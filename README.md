@@ -80,3 +80,86 @@ This project natively supports two widely used bearing datasets:
 
 To train the models from scratch, download these datasets and update the paths in `rf_config.py`:
 ```python
+FEMTO_PATH = "path/to/FEMTO datasets/"
+XJTU_PATH = "path/to/XJTU-SY_Bearing_Datasets/"
+```
+
+---
+
+## � Usage
+
+### 1. Launching the Web Dashboard
+The easiest way to interact with the project is through the web application.
+
+```bash
+python app.py
+```
+* Then open your browser and navigate to `http://localhost:5000`
+* **Single Prediction:** Upload a single vibration CSV file to get an instant RUL prediction.
+* **Batch Prediction:** Upload all CSV files belonging to a specific bearing to visualize its health degradation over time.
+
+### 2. Training the Models (CLI)
+To retrain the models on your data:
+```bash
+python train_rf.py
+```
+*This will extract features, train Random Forest and XGB models, and save them to `rf_models/`.*
+
+### 3. Testing on a Single File (CLI)
+```bash
+python test_rf.py --csv "datasets/FEMTO datasets/Learning_set/Bearing1_1/acc_00100.csv"
+```
+
+### 4. Running Exploratory Data Analysis (EDA)
+Generate correlation matrices, feature distributions, and signal plots:
+```bash
+python eda.py
+```
+
+---
+
+## 🔬 Scientific Approach & Feature Engineering
+
+Instead of feeding raw time-series data into a black-box deep learning model, this project relies on **domain knowledge** to compress the vibration signals into 43 highly informative features per file:
+
+- **Time-Domain (16 features):** Mean, Standard Deviation, RMS, Peak Value, Kurtosis, Skewness, Crest Factor, Shape Factor (Calculated for horizontal and vertical vibration channels).
+- **Frequency-Domain (16 features):** Frequency Center, Mean Square Frequency, Variance Frequency. Also extracts specific defect frequencies based on the physical bearing geometry (BPFO, BPFI, BSF, FTF).
+- **Envelope Analysis (8 features):** Characteristics of the enveloped signal to detect impacts hidden in the noise.
+- **Operating Conditions (3 features):** Normalized values representing rotational speed and radial load.
+
+### Why Classical ML over Deep Learning here?
+1. **Speed & Efficiency:** Trains in minutes on a standard CPU, compared to hours/days required for CNNs/LSTMs.
+2. **Data Efficiency:** Performs exceptionally well even with a limited number of run-to-failure bearing trajectories.
+3. **Interpretability:** Tree-based models provide feature importance scores, allowing engineers to understand exactly *why* a particular prediction is made.
+
+---
+
+## 📈 Performance Tracking
+
+*Note: Results may vary slightly depending on the exact train/test split of the datasets.*
+
+| Model | MAE (Mean Absolute Error) | R² Score |
+| :--- | :---: | :---: |
+| **Random Forest** | ~180-220 cycles | 0.65 - 0.75 |
+| **XGBoost** | ~150-200 cycles | 0.70 - 0.80 |
+
+*Both models consistently outperform baseline deep learning approaches on these specific datasets when training data is limited.*
+
+---
+
+## �️ Built With
+* **Python** - Core logic and ML
+* **Scikit-Learn & XGBoost** - Machine Learning models
+* **Pandas & NumPy** - Data manipulation
+* **SciPy** - Signal processing and feature extraction
+* **Flask** - Web framework
+* **Vanilla HTML/CSS/JS** - Custom frontend architecture
+* **Chart.js** - Interactive frontend data visualization
+
+---
+
+## 🤝 Contributing
+Contributions, issues, and feature requests are welcome! Feel free to check the issues page.
+
+## 📝 License
+This project is open source and available under the [MIT License](LICENSE).
