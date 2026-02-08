@@ -41,3 +41,46 @@ def extract_freq_features(vibration, fs=25600):
     f_nyquist = fs / 2.0
     
     for ch in range(2):
+        sig = vibration[ch]
+        
+        fft_vals = np.fft.rfft(sig)
+        freqs = np.fft.rfftfreq(len(sig), 1/fs)
+        magnitude = np.abs(fft_vals)
+        
+        total_mag = np.sum(magnitude) + 1e-8
+        mag_norm = magnitude / total_mag
+        
+        centroid = np.sum(freqs * mag_norm)
+        variance = np.sum(((freqs - centroid)**2) * mag_norm)
+        dominant_freq = freqs[np.argmax(magnitude)]
+        
+        features.extend([
+            centroid / f_nyquist,
+            np.sqrt(variance + 1e-8) / f_nyquist,
+            dominant_freq / f_nyquist
+        ])
+        
+        # Band powers (log-scaled)
+        bands = [(10, 50), (60, 180), (100, 300), (300, 1000), (1000, 3000)]
+        for low, high in bands:
+            mask = (freqs >= low) & (freqs <= high)
+            band_power = np.sum(magnitude[mask] ** 2)
+            features.append(np.log1p(band_power))
+    
+    return np.array(features, dtype=np.float32)
+
+
+def extract_envelope_features(vibration, fs=25600):
+    """Extract envelope features (8 features total)"""
+    features = []
+    
+    for ch in range(2):
+        sig = vibration[ch]
+        
+        sos = signal.butter(4, 1000, 'hp', fs=fs, output='sos')
+        sig_filtered = signal.sosfilt(sos, sig)
+        
+        analytic = signal.hilbert(sig_filtered)
+        envelope = np.abs(analytic)
+        
+        features.extend([
