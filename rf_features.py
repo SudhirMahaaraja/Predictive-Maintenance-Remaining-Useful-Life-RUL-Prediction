@@ -84,3 +84,46 @@ def extract_envelope_features(vibration, fs=25600):
         envelope = np.abs(analytic)
         
         features.extend([
+            np.mean(envelope),
+            np.std(envelope),
+            np.max(envelope),
+            kurtosis(envelope)
+        ])
+    
+    return np.array(features, dtype=np.float32)
+
+
+def extract_all_features(vibration, fs=25600):
+    """
+    Extract all features from a single vibration window
+    Returns: 40 features (16 time + 16 freq + 8 envelope)
+    """
+    try:
+        time_feat = extract_time_features(vibration)
+        freq_feat = extract_freq_features(vibration, fs)
+        env_feat = extract_envelope_features(vibration, fs)
+        
+        all_feat = np.concatenate([time_feat, freq_feat, env_feat])
+        
+        # Replace any NaN/Inf
+        all_feat = np.nan_to_num(all_feat, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        return all_feat
+    except Exception as e:
+        print(f"Warning: Feature extraction failed: {e}")
+        return np.zeros(40, dtype=np.float32)
+
+
+def aggregate_features(features_list, method='all'):
+    """
+    Aggregate features from multiple windows into a single feature vector
+    
+    Args:
+        features_list: List of feature arrays from different time windows
+        method: 'last', 'mean', 'std', 'trend', or 'all'
+    
+    Returns:
+        Aggregated feature vector
+    """
+    if len(features_list) == 0:
+        return np.zeros(40, dtype=np.float32)
