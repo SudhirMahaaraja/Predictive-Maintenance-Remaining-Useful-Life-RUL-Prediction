@@ -127,3 +127,46 @@ def aggregate_features(features_list, method='all'):
     """
     if len(features_list) == 0:
         return np.zeros(40, dtype=np.float32)
+    
+    features_array = np.array(features_list)  # (n_windows, 40)
+    
+    if method == 'last':
+        # Use only the last window (most recent)
+        return features_array[-1]
+    
+    elif method == 'mean':
+        # Average across all windows
+        return np.mean(features_array, axis=0)
+    
+    elif method == 'std':
+        # Standard deviation across windows (captures variability)
+        return np.std(features_array, axis=0)
+    
+    elif method == 'trend':
+        # Linear trend of each feature over time
+        n = len(features_array)
+        x = np.arange(n)
+        trends = []
+        for i in range(features_array.shape[1]):
+            y = features_array[:, i]
+            if np.std(y) < 1e-8:
+                trends.append(0.0)
+            else:
+                slope = np.polyfit(x, y, 1)[0]
+                trends.append(slope)
+        return np.array(trends, dtype=np.float32)
+    
+    elif method == 'all':
+        # Combine multiple aggregations
+        mean_feat = np.mean(features_array, axis=0)
+        std_feat = np.std(features_array, axis=0)
+        last_feat = features_array[-1]
+        
+        # For trend, only use last 20% of windows to capture recent degradation
+        n_recent = max(1, len(features_array) // 5)
+        recent_mean = np.mean(features_array[-n_recent:], axis=0)
+        
+        return np.concatenate([mean_feat, std_feat, last_feat, recent_mean])
+    
+    else:
+        raise ValueError(f"Unknown aggregation method: {method}")
