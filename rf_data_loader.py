@@ -99,3 +99,104 @@ def load_femto_bearing(bearing_path, bearing_id, config):
     features = np.array(features_list)
     ruls = np.array(ruls)
     
+    metadata = {
+        'bearing_id': bearing_id,
+        'dataset': 'FEMTO',
+        'speed': speed,
+        'load': load,
+        'n_samples': len(features)
+    }
+    
+    return features, ruls, metadata
+
+
+def load_xjtu_bearing(bearing_path, bearing_id, condition, config):
+    """Load one XJTU-SY bearing"""
+    csv_files = sorted([f for f in os.listdir(bearing_path) if f.endswith('.csv')],
+                      key=natural_sort_key)
+    
+    if len(csv_files) == 0:
+        return None
+    
+    conditions = config.XJTU_CONDITIONS.get(condition, {'speed': 2100, 'load': 12000})
+    speed = conditions['speed']
+    load = conditions['load']
+    
+    total_cycles = len(csv_files)
+    features_list = []
+    ruls = []
+    
+    for idx, csv_file in enumerate(csv_files):
+        file_path = os.path.join(bearing_path, csv_file)
+        
+        try:
+            df = pd.read_csv(file_path)
+            
+            if df.shape[1] >= 2:
+                horiz = df.iloc[:, 0].values
+                vert = df.iloc[:, 1].values
+            else:
+                horiz = df.iloc[:, 0].values
+                vert = df.iloc[:, 0].values
+            
+            if len(horiz) != config.XJTU_SAMPLE_RATE:
+                horiz = resample(horiz, config.XJTU_SAMPLE_RATE)
+                vert = resample(vert, config.XJTU_SAMPLE_RATE)
+            
+            vibration = np.stack([horiz, vert], axis=0).astype(np.float32)
+            
+            window_size = config.WINDOW_SIZE
+            if vibration.shape[1] >= window_size:
+                start = (vibration.shape[1] - window_size) // 2
+                vib_window = vibration[:, start:start+window_size]
+            else:
+                vib_window = vibration
+            
+            feats = extract_all_features(vib_window, fs=config.XJTU_SAMPLE_RATE)
+            
+            if config.USE_OPERATING_CONDITIONS:
+                norm_speed = speed / config.MAX_SPEED
+                norm_load = load / config.MAX_LOAD
+                temp = 25.0 + (idx / total_cycles) * 15.0
+                norm_temp = temp / config.MAX_TEMP
+                feats = np.concatenate([feats, [norm_speed, norm_load, norm_temp]])
+            
+            features_list.append(feats)
+            
+            rul = total_cycles - idx - 1
+            ruls.append(rul)
+            
+        except Exception as e:
+            print(f"    Error loading {csv_file}: {e}")
+            continue
+    
+    if len(features_list) == 0:
+        return None
+    
+    features = np.array(features_list)
+    ruls = np.array(ruls)
+    
+    metadata = {
+        'bearing_id': f"{condition}_{bearing_id}",
+        'dataset': 'XJTU',
+        'speed': speed,
+        'load': load,
+        'n_samples': len(features)
+    }
+    
+    return features, ruls, metadata
+
+
+def load_all_data(config):
+    """
+    Load all bearing data from FEMTO and XJTU-SY datasets
+    
+    Returns:
+        all_data: List of (features, ruls, metadata) tuples
+    """
+    all_data = []
+    
+    print("Loading datasets...")
+    
+    # Load FEMTO
+    for dataset_type in ['Learning_set', 'Test_set', 'Full_Test_Set']:
