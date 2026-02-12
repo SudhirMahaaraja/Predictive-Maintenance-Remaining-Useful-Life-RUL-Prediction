@@ -200,3 +200,105 @@ def load_all_data(config):
     
     # Load FEMTO
     for dataset_type in ['Learning_set', 'Test_set', 'Full_Test_Set']:
+        data_path = os.path.join(config.FEMTO_PATH, dataset_type)
+        if not os.path.exists(data_path):
+            continue
+        
+        bearing_folders = [f for f in os.listdir(data_path) 
+                          if os.path.isdir(os.path.join(data_path, f))]
+        
+        for bearing_id in bearing_folders:
+            bearing_path = os.path.join(data_path, bearing_id)
+            print(f"  Loading {dataset_type}/{bearing_id}...")
+            
+            result = load_femto_bearing(bearing_path, bearing_id, config)
+            if result is not None:
+                features, ruls, metadata = result
+                metadata['bearing_id'] = f"{dataset_type}_{bearing_id}"
+                all_data.append((features, ruls, metadata))
+                print(f"    Loaded {len(features)} samples, RUL range: {ruls.min()}-{ruls.max()}")
+    
+    # Load XJTU
+    for condition in ['35Hz12kN', '37.5Hz11kN', '40Hz10kN']:
+        data_path = os.path.join(config.XJTU_PATH, condition)
+        if not os.path.exists(data_path):
+            continue
+        
+        bearing_folders = [f for f in os.listdir(data_path)
+                          if os.path.isdir(os.path.join(data_path, f))]
+        
+        for bearing_id in bearing_folders:
+            bearing_path = os.path.join(data_path, bearing_id)
+            print(f"  Loading {condition}/{bearing_id}...")
+            
+            result = load_xjtu_bearing(bearing_path, bearing_id, condition, config)
+            if result is not None:
+                features, ruls, metadata = result
+                all_data.append((features, ruls, metadata))
+                print(f"    Loaded {len(features)} samples, RUL range: {ruls.min()}-{ruls.max()}")
+    
+    print(f"\n✓ Loaded {len(all_data)} bearings total")
+    
+    return all_data
+
+
+def create_train_val_test_split(all_data, config):
+    """
+    Split data by bearing (not by samples) with stratification by lifetime
+    
+    Returns:
+        X_train, y_train, X_val, y_val, X_test, y_test
+    """
+    np.random.seed(config.SEED)
+    
+    # Calculate lifetime for each bearing
+    bearing_info = []
+    for features, ruls, metadata in all_data:
+        lifetime = len(features)
+        bearing_info.append({
+            'data': (features, ruls, metadata),
+            'lifetime': lifetime,
+            'bearing_id': metadata['bearing_id']
+        })
+    
+    # Sort by lifetime for stratification
+    bearing_info.sort(key=lambda x: x['lifetime'])
+    
+    # Stratified split
+    n_bearings = len(bearing_info)
+    train_data, val_data, test_data = [], [], []
+    
+    # Round-robin assignment
+    for i, info in enumerate(bearing_info):
+        if i % 10 < 7:  # 70% train
+            train_data.append(info['data'])
+        elif i % 10 < 8.5:  # 15% val
+            val_data.append(info['data'])
+        else:  # 15% test
+            test_data.append(info['data'])
+    
+    print(f"\nDataset split:")
+    print(f"  Train: {len(train_data)} bearings")
+    print(f"  Val:   {len(val_data)} bearings")
+    print(f"  Test:  {len(test_data)} bearings")
+    
+    # Flatten into (X, y) arrays
+    def flatten_data(data_list):
+        X_list, y_list = [], []
+        for features, ruls, metadata in data_list:
+            X_list.append(features)
+            y_list.append(ruls)
+        X = np.vstack(X_list)
+        y = np.concatenate(y_list)
+        return X, y
+    
+    X_train, y_train = flatten_data(train_data)
+    X_val, y_val = flatten_data(val_data)
+    X_test, y_test = flatten_data(test_data)
+    
+    print(f"\nSample counts:")
+    print(f"  Train: {len(X_train)} samples")
+    print(f"  Val:   {len(X_val)} samples")
+    print(f"  Test:  {len(X_test)} samples")
+    
+    return X_train, y_train, X_val, y_val, X_test, y_test
