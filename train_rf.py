@@ -211,3 +211,216 @@ def train_random_forest(X_train, y_train, X_val, y_val, config):
     
     # ── Sample Weights (Fix #2: mid-range variance) ──
     sample_weights = compute_sample_weights(y_train, config)
+    if sample_weights is not None:
+        print(f"  Sample weights: {config.WEIGHT_SCHEME} (range {sample_weights.min():.2f}-{sample_weights.max():.2f})")
+    
+    epochs = config.EPOCHS
+    trees_per_epoch = config.N_ESTIMATORS // epochs
+    remainder_trees = config.N_ESTIMATORS % epochs
+    
+    print(f"\nTraining for {epochs} epochs ({trees_per_epoch} trees/epoch, {config.N_ESTIMATORS} total)...")
+    t0 = time.time()
+    
+    # Open epoch log file
+    log_path = os.path.join(config.OUTPUT_PATH, 'rf_epoch_log.txt')
+    log_file = open(log_path, 'w')
+    log_file.write(f"Random Forest Training Log - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    log_file.write(f"Total Epochs: {epochs} | Trees/Epoch: {trees_per_epoch} | Total Trees: {config.N_ESTIMATORS}\n")
+    log_file.write(f"RUL Cap: {config.RUL_CAP} | Log RUL: {config.USE_LOG_RUL} | Sample Weights: {config.USE_SAMPLE_WEIGHTS} ({config.WEIGHT_SCHEME})\n")
+    log_file.write("="*100 + "\n")
+    log_file.write(f"{'Epoch':>6} | {'Trees':>6} | {'Train MAE':>10} | {'Train RMSE':>11} | {'Train R²':>9} | {'Val MAE':>10} | {'Val RMSE':>11} | {'Val R²':>9} | {'Val MAPE':>9} | {'Time(s)':>8}\n")
+    log_file.write("-"*100 + "\n")
+    log_file.flush()
+    
+    model = RandomForestRegressor(
+        n_estimators=trees_per_epoch,
+        max_depth=config.MAX_DEPTH,
+        min_samples_split=config.MIN_SAMPLES_SPLIT,
+        min_samples_leaf=config.MIN_SAMPLES_LEAF,
+        max_features=config.MAX_FEATURES,
+        n_jobs=config.N_JOBS,
+        random_state=config.RANDOM_STATE,
+        warm_start=True,
+        verbose=0
+    )
+    
+    epoch_history = []
+    best_val_mae = float('inf')
+    best_epoch = 0
+    
+    for epoch in range(1, epochs + 1):
+        # Add trees for this epoch
+        if epoch == 1:
+            current_trees = trees_per_epoch
+        else:
+            current_trees = model.n_estimators + trees_per_epoch
+        # Add remainder trees on last epoch
+        if epoch == epochs:
+            current_trees += remainder_trees
+        model.n_estimators = current_trees
+        
+        # Train on transformed RUL with sample weights
+        model.fit(X_train_scaled, y_train_t, sample_weight=sample_weights)
+        
+        # Predictions → inverse transform back to original scale
+        y_train_pred_t = model.predict(X_train_scaled)
+        y_val_pred_t = model.predict(X_val_scaled)
+        y_train_pred = inverse_transform_rul(y_train_pred_t, config)
+        y_val_pred = inverse_transform_rul(y_val_pred_t, config)
+        
+        # Metrics on ORIGINAL uncapped scale (correct R²)
+        train_metrics = calculate_metrics(y_train, y_train_pred)
+        val_metrics = calculate_metrics(y_val, y_val_pred)
+        
+        epoch_history.append({
+            'epoch': epoch,
+            'n_trees': current_trees,
+            'train_mae': train_metrics['mae'],
+            'train_rmse': train_metrics['rmse'],
+            'train_r2': train_metrics['r2'],
+            'val_mae': val_metrics['mae'],
+            'val_rmse': val_metrics['rmse'],
+            'val_r2': val_metrics['r2'],
+            'val_mape': val_metrics['mape']
+        })
+        
+        # Track best
+        if val_metrics['mae'] < best_val_mae:
+            best_val_mae = val_metrics['mae']
+            best_epoch = epoch
+        
+        elapsed = time.time() - t0
+        print(f"  Epoch {epoch:2d}/{epochs} | Trees: {current_trees:4d} | "
+              f"Train MAE: {train_metrics['mae']:.2f} | Val MAE: {val_metrics['mae']:.2f} | "
+              f"Val R²: {val_metrics['r2']:.4f} | Time: {elapsed:.1f}s")
+        
+        # Write to log file
+        log_file.write(f"{epoch:>6} | {current_trees:>6} | {train_metrics['mae']:>10.2f} | {train_metrics['rmse']:>11.2f} | {train_metrics['r2']:>9.4f} | {val_metrics['mae']:>10.2f} | {val_metrics['rmse']:>11.2f} | {val_metrics['r2']:>9.4f} | {val_metrics['mape']:>8.2f}% | {elapsed:>8.1f}\n")
+        log_file.flush()
+    
+    train_time = time.time() - t0
+    print(f"\n✓ Training completed in {train_time:.1f}s")
+    print(f"✓ Best Val MAE: {best_val_mae:.2f} at epoch {best_epoch}")
+    
+    # Write final summary to log
+    log_file.write("="*100 + "\n")
+    log_file.write(f"Training completed in {train_time:.1f}s\n")
+    log_file.write(f"Best Val MAE: {best_val_mae:.2f} at epoch {best_epoch}\n")
+    log_file.close()
+    print(f"✓ Epoch log saved: {log_path}")
+    
+    # Final metrics on UNCAPPED original scale (correct R²)
+    y_train_pred = inverse_transform_rul(model.predict(X_train_scaled), config)
+    y_val_pred = inverse_transform_rul(model.predict(X_val_scaled), config)
+    train_metrics = calculate_metrics(y_train, y_train_pred)
+    val_metrics = calculate_metrics(y_val, y_val_pred)
+    
+    print_metrics(train_metrics, "Training")
+    print_metrics(val_metrics, "Validation")
+    
+    # Feature importance with human-readable names
+    feature_importance = model.feature_importances_
+    top_15_idx = np.argsort(feature_importance)[-15:][::-1]
+    print("\n  ── Factors Affecting RUL (Feature Importance) ──")
+    for i, idx in enumerate(top_15_idx):
+        bar = '█' * int(feature_importance[idx] * 200)
+        print(f"    {i+1:2d}. {get_feature_name(idx):<25s} {feature_importance[idx]:.4f}  {bar}")
+    
+    # Plot epoch history
+    _plot_epoch_history(epoch_history, config)
+    
+    return model, scaler, val_metrics
+
+
+def _plot_epoch_history(epoch_history, config):
+    """Plot training metrics across epochs"""
+    epochs = [e['epoch'] for e in epoch_history]
+    
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # MAE plot
+    axes[0].plot(epochs, [e['train_mae'] for e in epoch_history], 'b-o', markersize=4, label='Train MAE')
+    axes[0].plot(epochs, [e['val_mae'] for e in epoch_history], 'r-o', markersize=4, label='Val MAE')
+    axes[0].set_xlabel('Epoch')
+    axes[0].set_ylabel('MAE (cycles)')
+    axes[0].set_title('MAE per Epoch')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+    
+    # R² plot
+    axes[1].plot(epochs, [e['train_r2'] for e in epoch_history], 'b-o', markersize=4, label='Train R²')
+    axes[1].plot(epochs, [e['val_r2'] for e in epoch_history], 'r-o', markersize=4, label='Val R²')
+    axes[1].set_xlabel('Epoch')
+    axes[1].set_ylabel('R²')
+    axes[1].set_title('R² per Epoch')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    save_path = os.path.join(config.OUTPUT_PATH, 'rf_epoch_history.png')
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+    print(f"✓ Saved epoch history plot: {save_path}")
+
+
+def train_xgboost(X_train, y_train, X_val, y_val, config):
+    """Train XGBoost model"""
+    if not XGBOOST_AVAILABLE:
+        return None, None, None
+    
+    print("\n" + "="*80)
+    print("TRAINING XGBOOST")
+    print("="*80)
+    
+    # Normalize features
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
+    
+    # Apply same RUL transform
+    y_train_t = transform_rul(y_train, config)
+    y_val_t = transform_rul(y_val, config)
+    sample_weights = compute_sample_weights(y_train, config)
+    
+    # Train model
+    print(f"\nTraining with {config.XGB_N_ESTIMATORS} estimators...")
+    t0 = time.time()
+    
+    model = XGBRegressor(
+        n_estimators=config.XGB_N_ESTIMATORS,
+        max_depth=config.XGB_MAX_DEPTH,
+        learning_rate=config.XGB_LEARNING_RATE,
+        subsample=config.XGB_SUBSAMPLE,
+        colsample_bytree=config.XGB_COLSAMPLE_BYTREE,
+        random_state=config.RANDOM_STATE,
+        n_jobs=config.N_JOBS,
+        verbosity=1
+    )
+    
+    model.fit(
+        X_train_scaled, y_train_t,
+        eval_set=[(X_val_scaled, y_val_t)],
+        sample_weight=sample_weights,
+        verbose=True
+    )
+    
+    train_time = time.time() - t0
+    print(f"✓ Training completed in {train_time:.1f}s")
+    
+    # Predictions → inverse transform
+    y_train_pred = inverse_transform_rul(model.predict(X_train_scaled), config)
+    y_val_pred = inverse_transform_rul(model.predict(X_val_scaled), config)
+    
+    # Metrics on original uncapped scale
+    train_metrics = calculate_metrics(y_train, y_train_pred)
+    val_metrics = calculate_metrics(y_val, y_val_pred)
+    
+    print_metrics(train_metrics, "XGB Training")
+    print_metrics(val_metrics, "XGB Validation")
+    
+    return model, scaler, val_metrics
+
+
+def save_onnx_models(model, scaler, n_features, config, model_type='rf'):
+    """Export model + scaler as a single ONNX pipeline"""
+    from sklearn.pipeline import Pipeline
