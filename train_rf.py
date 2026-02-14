@@ -424,3 +424,217 @@ def train_xgboost(X_train, y_train, X_val, y_val, config):
 def save_onnx_models(model, scaler, n_features, config, model_type='rf'):
     """Export model + scaler as a single ONNX pipeline"""
     from sklearn.pipeline import Pipeline
+    
+    # Create pipeline: scaler → model
+    pipeline = Pipeline([
+        ('scaler', scaler),
+        ('model', model)
+    ])
+    
+    initial_type = [('float_input', FloatTensorType([None, n_features]))]
+    
+    if model_type == 'rf':
+        if not SKL2ONNX_AVAILABLE:
+            print("⚠ skl2onnx not installed. Skipping RF ONNX export.")
+            return
+        try:
+            onnx_model = convert_sklearn(pipeline, initial_types=initial_type,
+                                         target_opset=12)
+            onnx_path = os.path.join(config.MODEL_SAVE_PATH, 'random_forest_model.onnx')
+            with open(onnx_path, 'wb') as f:
+                f.write(onnx_model.SerializeToString())
+            print(f"✓ Random Forest ONNX saved: {onnx_path} ({os.path.getsize(onnx_path)/1024/1024:.1f} MB)")
+        except Exception as e:
+            print(f"⚠ RF ONNX export failed: {e}")
+    
+    elif model_type == 'xgb':
+        if not ONNXMLTOOLS_AVAILABLE:
+            print("⚠ onnxmltools not installed. Skipping XGBoost ONNX export.")
+            return
+        try:
+            # Export XGBoost separately (pipeline conversion can be tricky)
+            xgb_initial = [('float_input', XGBFloatTensorType([None, n_features]))]
+            onnx_xgb = onnxmltools.convert_xgboost(model, initial_types=xgb_initial,
+                                                     target_opset=12)
+            onnx_path = os.path.join(config.MODEL_SAVE_PATH, 'xgboost_model.onnx')
+            with open(onnx_path, 'wb') as f:
+                f.write(onnx_xgb.SerializeToString())
+            print(f"✓ XGBoost ONNX saved: {onnx_path} ({os.path.getsize(onnx_path)/1024/1024:.1f} MB)")
+            
+            # Also save scaler separately for XGBoost ONNX inference
+            scaler_onnx = convert_sklearn(scaler, initial_types=initial_type,
+                                           target_opset=12)
+            scaler_path = os.path.join(config.MODEL_SAVE_PATH, 'xgb_scaler.onnx')
+            with open(scaler_path, 'wb') as f:
+                f.write(scaler_onnx.SerializeToString())
+            print(f"✓ XGBoost scaler ONNX saved: {scaler_path}")
+        except Exception as e:
+            print(f"⚠ XGBoost ONNX export failed: {e}")
+
+
+def main():
+    config = RFConfig()
+    
+    # Create output directories
+    os.makedirs(config.OUTPUT_PATH, exist_ok=True)
+    os.makedirs(config.MODEL_SAVE_PATH, exist_ok=True)
+    
+    print("="*80)
+    print("RANDOM FOREST BEARING RUL PREDICTION")
+    print("="*80)
+    
+    # Load data
+    all_data = load_all_data(config)
+    
+    if len(all_data) == 0:
+        print("❌ No data loaded. Check dataset paths.")
+        return
+    
+    # Split data
+    X_train, y_train, X_val, y_val, X_test, y_test = create_train_val_test_split(all_data, config)
+    
+    print(f"\nFeature dimension: {X_train.shape[1]}")
+    print(f"RUL range: {y_train.min():.0f} - {y_train.max():.0f} cycles")
+    
+    # Train Random Forest
+    rf_model, rf_scaler, rf_val_metrics = train_random_forest(
+        X_train, y_train, X_val, y_val, config
+    )
+    
+    # Save Random Forest model
+    rf_save_path = os.path.join(config.MODEL_SAVE_PATH, 'random_forest_model.pkl')
+    with open(rf_save_path, 'wb') as f:
+        pickle.dump({
+            'model': rf_model,
+            'scaler': rf_scaler,
+            'config': config,
+            'val_metrics': rf_val_metrics
+        }, f)
+    print(f"\n✓ Random Forest model saved: {rf_save_path}")
+    
+    # Plot predictions (inverse-transformed)
+    X_val_scaled = rf_scaler.transform(X_val)
+    y_val_pred = inverse_transform_rul(rf_model.predict(X_val_scaled), config)
+    plot_predictions(
+        y_val, y_val_pred,
+        f"Random Forest - Val MAE: {rf_val_metrics['mae']:.1f}",
+        os.path.join(config.OUTPUT_PATH, 'rf_predictions.png')
+    )
+    
+    # Train XGBoost (if available)
+    if XGBOOST_AVAILABLE:
+        xgb_model, xgb_scaler, xgb_val_metrics = train_xgboost(
+            X_train, y_train, X_val, y_val, config
+        )
+        
+        if xgb_model is not None:
+            # Save XGBoost model
+            xgb_save_path = os.path.join(config.MODEL_SAVE_PATH, 'xgboost_model.pkl')
+            with open(xgb_save_path, 'wb') as f:
+                pickle.dump({
+                    'model': xgb_model,
+                    'scaler': xgb_scaler,
+                    'config': config,
+                    'val_metrics': xgb_val_metrics
+                }, f)
+            print(f"\n✓ XGBoost model saved: {xgb_save_path}")
+            
+            # Plot predictions
+            X_val_scaled = xgb_scaler.transform(X_val)
+            y_val_pred = inverse_transform_rul(xgb_model.predict(X_val_scaled), config)
+            plot_predictions(
+                y_val, y_val_pred,
+                f"XGBoost - Val MAE: {xgb_val_metrics['mae']:.1f}",
+                os.path.join(config.OUTPUT_PATH, 'xgb_predictions.png')
+            )
+    
+    # Test set evaluation — use UNCAPPED y_test for R² (fix R² collapse)
+    print("\n" + "="*80)
+    print("TEST SET EVALUATION")
+    print("="*80)
+    
+    # RF test
+    X_test_scaled = rf_scaler.transform(X_test)
+    y_test_pred_rf = inverse_transform_rul(rf_model.predict(X_test_scaled), config)
+    test_metrics_rf = calculate_metrics(y_test, y_test_pred_rf)
+    
+    print("\n── Random Forest ──")
+    print_metrics(test_metrics_rf, "RF Test")
+    
+    plot_predictions(
+        y_test, y_test_pred_rf,
+        f"Random Forest Test - MAE: {test_metrics_rf['mae']:.1f}",
+        os.path.join(config.OUTPUT_PATH, 'rf_test_predictions.png')
+    )
+    
+    # Save test results
+    results = {
+        'random_forest': {
+            'val_metrics': rf_val_metrics,
+            'test_metrics': test_metrics_rf
+        }
+    }
+    
+    xgb_test_done = False
+    if XGBOOST_AVAILABLE and xgb_model is not None:
+        X_test_scaled = xgb_scaler.transform(X_test)
+        y_test_pred_xgb = inverse_transform_rul(xgb_model.predict(X_test_scaled), config)
+        test_metrics_xgb = calculate_metrics(y_test, y_test_pred_xgb)
+        
+        print("\n── XGBoost ──")
+        print_metrics(test_metrics_xgb, "XGB Test")
+        
+        plot_predictions(
+            y_test, y_test_pred_xgb,
+            f"XGBoost Test - MAE: {test_metrics_xgb['mae']:.1f}",
+            os.path.join(config.OUTPUT_PATH, 'xgb_test_predictions.png')
+        )
+        
+        results['xgboost'] = {
+            'val_metrics': xgb_val_metrics,
+            'test_metrics': test_metrics_xgb
+        }
+        xgb_test_done = True
+    
+    # ── FINAL SUMMARY TABLE ──
+    print("\n" + "="*80)
+    print("FINAL MODEL COMPARISON")
+    print("="*80)
+    print(f"{'Metric':<20} | {'RF Val':>12} | {'RF Test':>12}", end='')
+    if xgb_test_done:
+        print(f" | {'XGB Val':>12} | {'XGB Test':>12}", end='')
+    print()
+    print("-"*80)
+    for key, label in [('mae','MAE (cycles)'), ('rmse','RMSE (cycles)'), ('r2','R²'), ('mape','MAPE (%)'),
+                        ('acc_50','Acc ±50'), ('acc_100','Acc ±100'), ('acc_200','Acc ±200'), ('acc_500','Acc ±500')]:
+        fmt = '.2f' if key != 'r2' else '.4f'
+        suffix = '%' if 'acc' in key else ''
+        rv = rf_val_metrics.get(key, 0)
+        rt = test_metrics_rf.get(key, 0)
+        print(f"{label:<20} | {rv:>11{fmt}}{suffix} | {rt:>11{fmt}}{suffix}", end='')
+        if xgb_test_done:
+            xv = xgb_val_metrics.get(key, 0)
+            xt = test_metrics_xgb.get(key, 0)
+            print(f" | {xv:>11{fmt}}{suffix} | {xt:>11{fmt}}{suffix}", end='')
+        print()
+    print("="*80)
+    
+    # Save results JSON
+    results_path = os.path.join(config.OUTPUT_PATH, 'test_results.json')
+    with open(results_path, 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"\n✓ Test results saved: {results_path}")
+    
+    # ── Export to ONNX ──
+    n_features = X_train.shape[1]
+    save_onnx_models(rf_model, rf_scaler, n_features, config, model_type='rf')
+    if XGBOOST_AVAILABLE and xgb_model is not None:
+        save_onnx_models(xgb_model, xgb_scaler, n_features, config, model_type='xgb')
+    
+    print("\n" + "="*80)
+    print("✓ TRAINING COMPLETE")
+    print("="*80)
+
+
+if __name__ == "__main__":
+    main()
