@@ -252,3 +252,131 @@ def random_test(model_path='rf_models/random_forest_model.pkl'):
     )
     
     # Compare
+    true_rul = info['true_rul']
+    error = predicted_rul - true_rul
+    pct_error = abs(error / (true_rul + 1)) * 100
+    
+    print("\n" + "="*80)
+    print("ACCURACY CHECK")
+    print("="*80)
+    print(f"  True RUL:      {true_rul} cycles")
+    print(f"  Predicted RUL: {predicted_rul:.1f} cycles")
+    print(f"  Error:         {error:+.1f} cycles ({pct_error:.1f}%)")
+    
+    if abs(error) < 50:
+        verdict = "🟢 EXCELLENT"
+    elif abs(error) < 150:
+        verdict = "🟡 GOOD"
+    elif abs(error) < 350:
+        verdict = "🟠 MODERATE"
+    else:
+        verdict = "🔴 POOR"
+    print(f"  Verdict:       {verdict}")
+    print("="*80)
+    
+    return predicted_rul, true_rul
+
+
+def batch_predict(bearing_folder, model_path='rf_models/random_forest_model.pkl',
+                  speed=1800, load=4000, temp=35):
+    """
+    Predict RUL for all CSV files in a bearing folder
+    Useful for validating degradation trend
+    """
+    csv_files = sorted([f for f in os.listdir(bearing_folder) if f.endswith('.csv')])
+    
+    if len(csv_files) == 0:
+        print(f"No CSV files found in {bearing_folder}")
+        return
+    
+    print(f"Found {len(csv_files)} files in bearing folder")
+    print("Predicting RUL for each file...\n")
+    
+    predictions = []
+    true_ruls = []
+    
+    total_cycles = len(csv_files)
+    
+    for i, csv_file in enumerate(csv_files):
+        if i % 10 == 0:
+            print(f"Progress: {i}/{len(csv_files)}")
+        
+        csv_path = os.path.join(bearing_folder, csv_file)
+        try:
+            pred_rul = predict_rul(csv_path, model_path, speed, load, temp)
+            predictions.append(pred_rul)
+            
+            true_rul = total_cycles - i - 1
+            true_ruls.append(true_rul)
+        except Exception as e:
+            print(f"Error processing {csv_file}: {e}")
+            predictions.append(np.nan)
+            true_ruls.append(total_cycles - i - 1)
+    
+    # Plot results
+    import matplotlib.pyplot as plt
+    
+    plt.figure(figsize=(12, 5))
+    
+    x = np.arange(len(predictions))
+    
+    plt.subplot(1, 2, 1)
+    plt.plot(x, true_ruls, 'b-', label='True RUL', linewidth=2)
+    plt.plot(x, predictions, 'r--', label='Predicted RUL', linewidth=2, alpha=0.7)
+    plt.xlabel('Cycle Index')
+    plt.ylabel('RUL (cycles)')
+    plt.title('RUL Prediction Over Bearing Lifetime')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    plt.subplot(1, 2, 2)
+    errors = np.array(predictions) - np.array(true_ruls)
+    plt.scatter(true_ruls, errors, alpha=0.5, s=10)
+    plt.axhline(y=0, color='r', linestyle='--')
+    plt.xlabel('True RUL (cycles)')
+    plt.ylabel('Prediction Error (cycles)')
+    plt.title('Prediction Error vs True RUL')
+    plt.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    output_path = 'rf_output/batch_prediction.png'
+    os.makedirs('rf_output', exist_ok=True)
+    plt.savefig(output_path, dpi=150)
+    print(f"\n✓ Saved prediction plot: {output_path}")
+    
+    # Calculate metrics
+    valid_mask = ~np.isnan(predictions)
+    if np.sum(valid_mask) > 0:
+        mae = np.mean(np.abs(np.array(predictions)[valid_mask] - np.array(true_ruls)[valid_mask]))
+        print(f"\nOverall MAE: {mae:.1f} cycles")
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Predict bearing RUL')
+    parser.add_argument('--csv', type=str, help='Path to CSV file')
+    parser.add_argument('--folder', type=str, help='Folder containing multiple CSV files (batch mode)')
+    parser.add_argument('--random', action='store_true', help='Pick a random CSV from datasets and test')
+    parser.add_argument('--model', type=str, default='rf_models/random_forest_model.pkl',
+                       help='Path to model file')
+    parser.add_argument('--speed', type=float, default=1800, help='Operating speed (RPM)')
+    parser.add_argument('--load', type=float, default=4000, help='Operating load (N)')
+    parser.add_argument('--temp', type=float, default=35, help='Operating temperature (°C)')
+    
+    args = parser.parse_args()
+    
+    if args.random:
+        # Random test mode
+        random_test(args.model)
+    elif args.folder:
+        # Batch mode
+        batch_predict(args.folder, args.model, args.speed, args.load, args.temp)
+    elif args.csv:
+        # Single file mode
+        predict_rul(args.csv, args.model, args.speed, args.load, args.temp)
+    else:
+        # Default: random test
+        print("No input specified. Running random test...\n")
+        random_test(args.model)
