@@ -125,3 +125,130 @@ def predict_rul(csv_path, model_path='rf_models/random_forest_model.pkl',
         predicted_rul: Predicted RUL in cycles
     """
     config = RFConfig()
+    
+    print("="*80)
+    print(f"PREDICTING RUL: {os.path.basename(csv_path)}")
+    print("="*80)
+    
+    # Load model
+    print(f"\nLoading model: {model_path}")
+    with open(model_path, 'rb') as f:
+        checkpoint = pickle.load(f)
+    
+    model = checkpoint['model']
+    scaler = checkpoint['scaler']
+    saved_config = checkpoint.get('config', config)
+    val_metrics = checkpoint.get('val_metrics', {})
+    
+    if val_metrics:
+        print(f"Model validation MAE: {val_metrics.get('mae', 'N/A'):.2f} cycles")
+    
+    # Load CSV
+    print(f"\nLoading vibration data...")
+    df = pd.read_csv(csv_path)
+    
+    # Auto-detect columns
+    h_col = next((c for c in df.columns if 'horiz' in c.lower() or 'horizontal' in c.lower()), None)
+    v_col = next((c for c in df.columns if 'vert' in c.lower() or 'vertical' in c.lower()), None)
+    
+    if h_col is None or v_col is None:
+        if len(df.columns) >= 2:
+            h_col, v_col = df.columns[0], df.columns[1]
+        else:
+            raise ValueError("CSV must have at least two columns")
+    
+    print(f"Using columns: '{h_col}' and '{v_col}'")
+    
+    sig_h = df[h_col].values.astype(np.float32)
+    sig_v = df[v_col].values.astype(np.float32)
+    
+    # Resample if needed
+    if len(sig_h) != config.SAMPLE_RATE:
+        sig_h = resample(sig_h, config.SAMPLE_RATE)
+        sig_v = resample(sig_v, config.SAMPLE_RATE)
+    
+    # Extract window
+    window_size = config.WINDOW_SIZE
+    if len(sig_h) >= window_size:
+        start = (len(sig_h) - window_size) // 2
+        sig_h = sig_h[start:start+window_size]
+        sig_v = sig_v[start:start+window_size]
+    
+    vibration = np.stack([sig_h, sig_v], axis=0)
+    
+    # Extract features
+    print("Extracting features...")
+    features = extract_all_features(vibration, fs=config.SAMPLE_RATE)
+    
+    # Add operating conditions
+    if config.USE_OPERATING_CONDITIONS:
+        norm_speed = speed / config.MAX_SPEED
+        norm_load = load / config.MAX_LOAD
+        norm_temp = temp / config.MAX_TEMP
+        features = np.concatenate([features, [norm_speed, norm_load, norm_temp]])
+    
+    print(f"Feature vector: {len(features)} dimensions")
+    
+    # Scale features
+    features_scaled = scaler.transform(features.reshape(1, -1))
+    
+    # Predict (raw output is in transformed space)
+    print("Running inference...")
+    raw_pred = model.predict(features_scaled)
+    
+    # Inverse transform if model was trained with log-RUL
+    predicted_rul = inverse_transform_rul(raw_pred, saved_config)[0]
+    
+    # Clamp to reasonable range
+    predicted_rul = max(0, min(predicted_rul, config.PRED_MAX))
+    
+    # Display results
+    print("\n" + "="*80)
+    print("PREDICTION RESULTS")
+    print("="*80)
+    print(f"  Predicted RUL:  {predicted_rul:.1f} cycles")
+    print(f"  RUL (%):        {(predicted_rul/config.RUL_CAP)*100:.1f}%")
+    
+    if predicted_rul > 500:
+        status = "HEALTHY"
+    elif predicted_rul > 200:
+        status = "DEGRADED"
+    else:
+        status = "CRITICAL"
+    print(f"  Status:         {status}")
+    
+    if val_metrics:
+        mae = val_metrics.get('mae', 0)
+        print(f"\n  Expected error: ±{mae:.0f} cycles (based on validation)")
+    
+    print("="*80)
+    
+    return predicted_rul
+
+
+def random_test(model_path='rf_models/random_forest_model.pkl'):
+    """Pick a random CSV from the datasets and test the model"""
+    config = RFConfig()
+    
+    print("="*80)
+    print("RANDOM FILE TEST")
+    print("="*80)
+    
+    info = pick_random_csv(config)
+    if info is None:
+        return
+    
+    print(f"\n  Dataset:   {info['dataset']}")
+    print(f"  Condition: {info['condition']}")
+    print(f"  Bearing:   {info['bearing']}")
+    print(f"  File:      {os.path.basename(info['csv_path'])} (#{info['file_index']+1} of {info['total_files']})")
+    print(f"  True RUL:  {info['true_rul']} cycles")
+    print(f"  Speed:     {info['speed']} RPM | Load: {info['load']} N")
+    print()
+    
+    predicted_rul = predict_rul(
+        info['csv_path'], model_path,
+        speed=info['speed'], load=info['load'], temp=info['temp']
+    )
+    
+    # Compare
