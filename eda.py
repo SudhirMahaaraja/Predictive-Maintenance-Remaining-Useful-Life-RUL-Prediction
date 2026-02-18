@@ -296,3 +296,302 @@ def plot_correlation_heatmap(all_data):
     cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.04)
     cbar.ax.tick_params(labelcolor='#c0c0c0')
 
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            v = corr_matrix[i, j]
+            ax.text(j, i, f'{v:.2f}', ha='center', va='center',
+                    fontsize=6, color='black' if abs(v) > 0.4 else '#c0c0c0')
+
+    ax.set_title('Feature Correlation Heatmap (Top 20 + RUL)', color='#e0e0ff',
+                 fontsize=13, fontweight='bold', pad=10)
+    ax.tick_params(colors='#c0c0c0')
+
+    plt.tight_layout()
+    return fig_to_b64(fig)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 5. RUL Degradation Trends
+# ──────────────────────────────────────────────────────────────────────────────
+
+def plot_degradation_trends(all_data, n_show=6):
+    """RUL vs cycle index for multiple bearings with feature overlays"""
+    selected = sorted(all_data, key=lambda d: len(d[0]), reverse=True)[:n_show]
+
+    fig = dark_fig(figsize=(15, 10))
+    fig.suptitle('RUL Degradation Trends', color='#e0e0ff',
+                 fontsize=14, fontweight='bold', y=0.99)
+
+    n_cols = 3
+    n_rows = (len(selected) + n_cols - 1) // n_cols
+
+    for idx, (feats, ruls, meta) in enumerate(selected):
+        ax = fig.add_subplot(n_rows, n_cols, idx + 1)
+        cycles = np.arange(len(ruls))
+        rms_vals = feats[:, 2]  # Horiz RMS
+
+        ax2 = ax.twinx()
+        ax2.plot(cycles, rms_vals, color=PALETTE[2], lw=1, alpha=0.5, linestyle='--')
+        ax2.set_ylabel('Horiz RMS', color=PALETTE[2], fontsize=7)
+        ax2.tick_params(axis='y', colors=PALETTE[2], labelsize=7)
+        ax2.set_facecolor('#16213e')
+        ax2.spines['right'].set_color(PALETTE[2])
+
+        ax.plot(cycles, ruls, color=PALETTE[idx % len(PALETTE)], lw=1.8)
+        ax.fill_between(cycles, ruls, alpha=0.12, color=PALETTE[idx % len(PALETTE)])
+        ax.axhline(y=200, color=PALETTE[2], linestyle=':', lw=1, alpha=0.7, label='Critical (200)')
+        ax.axhline(y=500, color=PALETTE[3], linestyle=':', lw=1, alpha=0.7, label='Degraded (500)')
+
+        bid = meta.get('bearing_id', f'B{idx}')
+        style_ax(ax, bid.split('_')[-1] if '_' in bid else bid, 'Cycle', 'RUL')
+
+        if idx == 0:
+            ax.legend(facecolor='#1a1a2e', labelcolor='#c0c0c0', fontsize=7, loc='upper right')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    return fig_to_b64(fig)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 6. Operating Conditions Analysis
+# ──────────────────────────────────────────────────────────────────────────────
+
+def plot_operating_conditions(all_data):
+    """Speed, load, temp distribution and effect on RUL"""
+    X, y = _build_flat_arrays(all_data)
+
+    if X.shape[1] < 43:
+        return None  # No operating conditions
+
+    speed_col = X.shape[1] - 3
+    load_col  = X.shape[1] - 2
+    temp_col  = X.shape[1] - 1
+
+    config = RFConfig()
+    speeds = X[:, speed_col] * config.MAX_SPEED
+    loads  = X[:, load_col]  * config.MAX_LOAD
+    temps  = X[:, temp_col]  * config.MAX_TEMP
+
+    fig = dark_fig(figsize=(15, 8))
+    fig.suptitle('Operating Conditions Analysis', color='#e0e0ff',
+                 fontsize=14, fontweight='bold', y=0.99)
+
+    axes = fig.subplots(2, 3)
+
+    # Speed distribution
+    axes[0][0].hist(speeds, bins=30, color=PALETTE[0], alpha=0.8, edgecolor='#1a1a2e')
+    style_ax(axes[0][0], 'Speed Distribution', 'Speed (RPM)', 'Count')
+
+    # Load distribution
+    axes[0][1].hist(loads, bins=30, color=PALETTE[1], alpha=0.8, edgecolor='#1a1a2e')
+    style_ax(axes[0][1], 'Load Distribution', 'Load (N)', 'Count')
+
+    # Temp distribution
+    axes[0][2].hist(temps, bins=30, color=PALETTE[2], alpha=0.8, edgecolor='#1a1a2e')
+    style_ax(axes[0][2], 'Temperature Distribution', 'Temp (°C)', 'Count')
+
+    # Speed vs RUL
+    sc = axes[1][0].scatter(speeds, y, c=y, cmap='plasma', s=3, alpha=0.4)
+    fig.colorbar(sc, ax=axes[1][0]).ax.tick_params(labelcolor='#c0c0c0')
+    style_ax(axes[1][0], 'Speed vs RUL', 'Speed (RPM)', 'RUL (cycles)')
+
+    # Load vs RUL
+    sc2 = axes[1][1].scatter(loads, y, c=y, cmap='viridis', s=3, alpha=0.4)
+    fig.colorbar(sc2, ax=axes[1][1]).ax.tick_params(labelcolor='#c0c0c0')
+    style_ax(axes[1][1], 'Load vs RUL', 'Load (N)', 'RUL (cycles)')
+
+    # Dataset boxplot by condition
+    unique_speeds = np.unique(np.round(speeds, -1))
+    groups = [y[np.abs(speeds - sp) < 50] for sp in unique_speeds]
+    groups = [g for g in groups if len(g) > 0]
+    bp = axes[1][2].boxplot(groups, patch_artist=True,
+                            boxprops=dict(facecolor='#6C63FF', color='#aaaacc'),
+                            whiskerprops=dict(color='#aaaacc'),
+                            medianprops=dict(color='#48E5C2', lw=2),
+                            flierprops=dict(marker='.', markerfacecolor='#FF6584',
+                                           markersize=2, alpha=0.5))
+    axes[1][2].set_xticklabels([f'{int(s)}rpm' for s in unique_speeds],
+                               rotation=30, ha='right', fontsize=8)
+    style_ax(axes[1][2], 'RUL by Speed Condition', 'Speed', 'RUL (cycles)')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    return fig_to_b64(fig)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 7. Feature Importance from Saved Model
+# ──────────────────────────────────────────────────────────────────────────────
+
+def plot_feature_importance():
+    """Load saved RF model and plot feature importance"""
+    import pickle
+
+    model_path = './rf_models/random_forest_model.pkl'
+    if not os.path.exists(model_path):
+        return None
+
+    with open(model_path, 'rb') as f:
+        ckpt = pickle.load(f)
+    importance = ckpt['model'].feature_importances_
+
+    n_feat = len(importance)
+    feat_names = FEAT_NAMES_BASE[:n_feat] if n_feat <= len(FEAT_NAMES_BASE) else \
+                 FEAT_NAMES_BASE + [f'F{i}' for i in range(len(FEAT_NAMES_BASE), n_feat)]
+
+    top_n = 20
+    idx_sorted = np.argsort(importance)[-top_n:]
+    top_names = [feat_names[i] for i in idx_sorted]
+    top_vals  = importance[idx_sorted]
+
+    fig = dark_fig(figsize=(11, 8))
+    ax = fig.add_subplot(111)
+    bar_colors = plt.cm.plasma(np.linspace(0.2, 0.9, top_n))
+    bars = ax.barh(range(top_n), top_vals, color=bar_colors, edgecolor='#1a1a2e')
+    ax.set_yticks(range(top_n))
+    ax.set_yticklabels(top_names, fontsize=9, color='#c0c0c0')
+    for i, (bar, val) in enumerate(zip(bars, top_vals)):
+        ax.text(val + 0.0003, bar.get_y() + bar.get_height() / 2,
+                f'{val:.4f}', va='center', ha='left', fontsize=7.5, color='#c0c0c0')
+    style_ax(ax, 'Top-20 Feature Importances (Random Forest)', 'Importance', '')
+    plt.tight_layout()
+    return fig_to_b64(fig)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 8. Prediction Performance Plots
+# ──────────────────────────────────────────────────────────────────────────────
+
+def plot_model_performance():
+    """Load test results JSON and existing prediction PNGs → encode to b64"""
+    results_path = './rf_output/test_results.json'
+    if not os.path.exists(results_path):
+        return None, None
+
+    with open(results_path) as f:
+        results = json.load(f)
+
+    plots = {}
+    for name, fname in [('rf_val', 'rf_predictions.png'),
+                        ('rf_test', 'rf_test_predictions.png'),
+                        ('xgb_val', 'xgb_predictions.png'),
+                        ('xgb_test', 'xgb_test_predictions.png')]:
+        path = f'./rf_output/{fname}'
+        if os.path.exists(path):
+            with open(path, 'rb') as fh:
+                plots[name] = base64.b64encode(fh.read()).decode('utf-8')
+
+    return results, plots
+
+
+def plot_epoch_history():
+    """Return epoch history plot as b64"""
+    path = './rf_output/rf_epoch_history.png'
+    if not os.path.exists(path):
+        return None
+    with open(path, 'rb') as f:
+        return base64.b64encode(f.read()).decode('utf-8')
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 9. Outlier / Anomaly Analysis
+# ──────────────────────────────────────────────────────────────────────────────
+
+def plot_outlier_analysis(all_data):
+    """IQR-based outlier counts per feature + z-score scatter"""
+    X, y = _build_flat_arrays(all_data)
+
+    if len(X) > 8000:
+        idx = np.random.choice(len(X), 8000, replace=False)
+        X, y = X[idx], y[idx]
+
+    # IQR outlier fraction per feature
+    Q1 = np.percentile(X, 25, axis=0)
+    Q3 = np.percentile(X, 75, axis=0)
+    IQR = Q3 - Q1
+    outlier_frac = np.mean((X < Q1 - 1.5 * IQR) | (X > Q3 + 1.5 * IQR), axis=0)
+
+    top_n = 20
+    top_idx = np.argsort(outlier_frac)[-top_n:]
+    top_names = [FEAT_NAMES_BASE[i] if i < len(FEAT_NAMES_BASE) else f'F{i}' for i in top_idx]
+
+    fig = dark_fig(figsize=(14, 6))
+    fig.suptitle('Outlier / Anomaly Analysis', color='#e0e0ff',
+                 fontsize=14, fontweight='bold', y=0.99)
+
+    ax1 = fig.add_subplot(1, 2, 1)
+    bar_colors = plt.cm.Reds(np.linspace(0.4, 0.9, top_n))
+    ax1.barh(range(top_n), outlier_frac[top_idx] * 100, color=bar_colors, edgecolor='#1a1a2e')
+    ax1.set_yticks(range(top_n))
+    ax1.set_yticklabels(top_names, fontsize=8, color='#c0c0c0')
+    style_ax(ax1, 'Outlier % per Feature (IQR method)', '% Samples Outlier', '')
+
+    # Z-score scatter: pick 2 most outlier features
+    feat_a, feat_b = top_idx[-1], top_idx[-2]
+    z_a = (X[:, feat_a] - np.mean(X[:, feat_a])) / (np.std(X[:, feat_a]) + 1e-8)
+    z_b = (X[:, feat_b] - np.mean(X[:, feat_b])) / (np.std(X[:, feat_b]) + 1e-8)
+
+    ax2 = fig.add_subplot(1, 2, 2)
+    sc = ax2.scatter(z_a, z_b, c=y, cmap='plasma', s=5, alpha=0.4)
+    fig.colorbar(sc, ax=ax2, label='RUL').ax.tick_params(labelcolor='#c0c0c0')
+    ax2.axhline(0, color='#aaaacc', lw=0.5, alpha=0.5)
+    ax2.axvline(0, color='#aaaacc', lw=0.5, alpha=0.5)
+    fn_a = top_names[-1]
+    fn_b = top_names[-2]
+    style_ax(ax2, f'Z-score: {fn_a} vs {fn_b}', f'{fn_a} (z)', f'{fn_b} (z)')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    return fig_to_b64(fig)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Master EDA runner
+# ──────────────────────────────────────────────────────────────────────────────
+
+def run_full_eda():
+    """Run all EDA and return results dict"""
+    config = RFConfig()
+    all_data = load_all_data(config)
+
+    results = {
+        'n_bearings': len(all_data),
+        'n_femto': sum(1 for _, _, m in all_data if m.get('dataset') == 'FEMTO'),
+        'n_xjtu':  sum(1 for _, _, m in all_data if m.get('dataset') == 'XJTU'),
+    }
+
+    X, y = _build_flat_arrays(all_data)
+    results['n_samples']   = len(y)
+    results['rul_min']     = float(y.min())
+    results['rul_max']     = float(y.max())
+    results['rul_mean']    = float(y.mean())
+    results['rul_median']  = float(np.median(y))
+    results['rul_std']     = float(y.std())
+    results['n_features']  = int(X.shape[1])
+    results['pct_critical']  = float(np.mean(y < 200) * 100)
+    results['pct_degraded']  = float(np.mean((y >= 200) & (y < 500)) * 100)
+    results['pct_healthy']   = float(np.mean(y >= 500) * 100)
+
+    results['plots'] = {}
+    results['plots']['dataset_overview']  = plot_dataset_overview(all_data)
+    results['plots']['signal_analysis']   = plot_signal_analysis(all_data, config)
+    results['plots']['feature_stats']     = plot_feature_statistics(all_data)
+    results['plots']['correlation']       = plot_correlation_heatmap(all_data)
+    results['plots']['degradation']       = plot_degradation_trends(all_data)
+    op_plot = plot_operating_conditions(all_data)
+    if op_plot:
+        results['plots']['operating_conditions'] = op_plot
+    fi_plot = plot_feature_importance()
+    if fi_plot:
+        results['plots']['feature_importance'] = fi_plot
+    results['plots']['outlier_analysis']  = plot_outlier_analysis(all_data)
+
+    ep_plot = plot_epoch_history()
+    if ep_plot:
+        results['plots']['epoch_history'] = ep_plot
+
+    model_results, model_plots = plot_model_performance()
+    if model_results:
+        results['model_results'] = model_results
+    if model_plots:
+        results['plots'].update(model_plots)
+
+    return results
