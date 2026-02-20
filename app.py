@@ -179,3 +179,184 @@ def _get_shap_explanation(model, model_type, features_scaled, feature_names=None
         ax.tick_params(colors='#8a9490', labelsize=8)
         ax.set_xlabel('SHAP Value (impact on RUL)', fontsize=9, color='#8a9490')
         for spine in ax.spines.values():
+            spine.set_color('#8a9490')
+            spine.set_alpha(0.3)
+        ax.axvline(x=0, color='#8a9490', linewidth=0.5, alpha=0.5)
+        plt.tight_layout()
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', transparent=True, dpi=120)
+        plt.close()
+        buf.seek(0)
+        shap_plot_b64 = base64.b64encode(buf.read()).decode('utf-8')
+
+        return {
+            'base_value': round(base_value, 2),
+            'top_features': top_features,
+            'shap_plot_b64': shap_plot_b64,
+        }
+
+    except ImportError:
+        print("SHAP not installed. Run: pip install shap")
+        return None
+    except Exception as e:
+        print(f"SHAP computation error: {e}\n{traceback.format_exc()}")
+        return None
+
+
+# ─── Feature names for SHAP ──────────────────────────────────────────────────
+
+FEATURE_NAMES = [
+    'Horiz_Mean', 'Horiz_Std', 'Horiz_RMS', 'Horiz_Peak',
+    'Horiz_Kurtosis', 'Horiz_Skewness', 'Horiz_CrestFactor', 'Horiz_ShapeFactor',
+    'Vert_Mean', 'Vert_Std', 'Vert_RMS', 'Vert_Peak',
+    'Vert_Kurtosis', 'Vert_Skewness', 'Vert_CrestFactor', 'Vert_ShapeFactor',
+    'Horiz_FreqCentroid', 'Horiz_FreqSpread', 'Horiz_DomFreq',
+    'Horiz_Band_FTF', 'Horiz_Band_BSF', 'Horiz_Band_BPFO', 'Horiz_Band_Mid', 'Horiz_Band_High',
+    'Vert_FreqCentroid', 'Vert_FreqSpread', 'Vert_DomFreq',
+    'Vert_Band_FTF', 'Vert_Band_BSF', 'Vert_Band_BPFO', 'Vert_Band_Mid', 'Vert_Band_High',
+    'Horiz_EnvMean', 'Horiz_EnvStd', 'Horiz_EnvMax', 'Horiz_EnvKurtosis',
+    'Vert_EnvMean', 'Vert_EnvStd', 'Vert_EnvMax', 'Vert_EnvKurtosis',
+    'Speed_RPM', 'Load_N', 'Temperature'
+]
+
+
+# ─── Routes ──────────────────────────────────────────────────────────────────
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+
+@app.route('/api/eda', methods=['GET'])
+def api_eda():
+    """Return EDA results (run if not cached)"""
+    global _eda_cache, _eda_running
+
+    force = request.args.get('force', 'false').lower() == 'true'
+
+    if force:
+        _eda_cache = None
+
+    if _eda_cache is not None:
+        return jsonify({'status': 'ready', 'data': _eda_cache})
+
+    if _eda_running:
+        return jsonify({'status': 'running'})
+
+    # Try loading from disk cache
+    cache_path = './rf_output/eda_cache.json'
+    if not force and os.path.exists(cache_path):
+        try:
+            with open(cache_path) as f:
+                _eda_cache = json.load(f)
+            return jsonify({'status': 'ready', 'data': _eda_cache})
+        except Exception:
+            pass
+
+    # Launch EDA in background thread
+    _eda_running = True
+
+    def run_eda():
+        global _eda_cache, _eda_running
+        try:
+            from eda import run_full_eda
+            result = run_full_eda()
+            with open(cache_path, 'w') as f:
+                json.dump(result, f)
+            with _eda_lock:
+                _eda_cache = result
+        except Exception as e:
+            print(f"EDA error: {e}\n{traceback.format_exc()}")
+        finally:
+            _eda_running = False
+
+    t = threading.Thread(target=run_eda, daemon=True)
+    t.start()
+
+    return jsonify({'status': 'started'})
+
+
+@app.route('/api/eda/status', methods=['GET'])
+def api_eda_status():
+    """Poll EDA progress"""
+    global _eda_cache, _eda_running
+    if _eda_cache is not None:
+        return jsonify({'status': 'ready'})
+    if _eda_running:
+        return jsonify({'status': 'running'})
+    return jsonify({'status': 'idle'})
+
+
+@app.route('/api/models', methods=['GET'])
+def api_models():
+    """Return list of available models and their metrics"""
+    models_info = {}
+    for mtype, fname in [('rf', 'random_forest_model.pkl'), ('xgb', 'xgboost_model.pkl')]:
+        path = f'./rf_models/{fname}'
+        if os.path.exists(path):
+            size_mb = os.path.getsize(path) / 1024 / 1024
+            ckpt = load_model(mtype)
+            metrics = ckpt.get('val_metrics', {}) if ckpt else {}
+            models_info[mtype] = {
+                'available': True,
+                'size_mb': round(size_mb, 1),
+                'val_metrics': metrics
+            }
+        else:
+            models_info[mtype] = {'available': False}
+
+    # Also load test results
+    results_path = './rf_output/test_results.json'
+    test_results = {}
+    if os.path.exists(results_path):
+        with open(results_path) as f:
+            test_results = json.load(f)
+
+    return jsonify({'models': models_info, 'test_results': test_results})
+
+
+@app.route('/api/predict/csv', methods=['POST'])
+def predict_csv():
+    """Predict RUL from uploaded CSV file"""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'Empty filename'}), 400
+
+    model_type = request.form.get('model', 'rf')
+    speed = float(request.form.get('speed', 1800))
+    load  = float(request.form.get('load', 4000))
+    temp  = float(request.form.get('temp', 35))
+
+    try:
+        fname = secure_filename(file.filename)
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+        file.save(save_path)
+
+        result = _predict_from_csv(save_path, model_type, speed, load, temp)
+        os.remove(save_path)
+        
+        # Add EDA plot
+        global _eda_cache
+        if _eda_cache and 'plots' in _eda_cache:
+            result['eda_plot_b64'] = _eda_cache['plots'].get('feature_importance')
+            
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+@app.route('/api/predict/manual', methods=['POST'])
+def predict_manual():
+    """Predict RUL from manually entered feature values"""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    model_type = data.get('model', 'rf')
+    speed = float(data.get('speed', 1800))
+    load  = float(data.get('load', 4000))
