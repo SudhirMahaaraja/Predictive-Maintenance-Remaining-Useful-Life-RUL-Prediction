@@ -360,3 +360,184 @@ def predict_manual():
     model_type = data.get('model', 'rf')
     speed = float(data.get('speed', 1800))
     load  = float(data.get('load', 4000))
+    temp  = float(data.get('temp', 35))
+
+    # Build a synthetic vibration signal from the provided parameters
+    rms       = float(data.get('rms', 0.5))
+    kurt      = float(data.get('kurtosis', 3.0))
+    dom_freq  = float(data.get('dominant_freq', 120.0))
+    env_rms   = float(data.get('envelope_rms', 0.3))
+
+    try:
+        features, sig_h, sig_v = _build_features_from_manual(
+            rms, kurt, dom_freq, env_rms, speed, load, temp
+        )
+
+        plot_b64 = _generate_signal_plot(sig_h, sig_v)
+        result = _predict_features(features, model_type, speed, load, temp)
+        result['plot_b64'] = plot_b64
+        
+        # Add EDA plot
+        global _eda_cache
+        if _eda_cache and 'plots' in _eda_cache:
+            result['eda_plot_b64'] = _eda_cache['plots'].get('feature_importance')
+            
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+# ─── NEW: Side-by-Side Comparison Endpoint ────────────────────────────────────
+
+@app.route('/api/predict/compare', methods=['POST'])
+def predict_compare():
+    """Run both RF and XGBoost on the same input, return side-by-side results."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    speed = float(data.get('speed', 1800))
+    load  = float(data.get('load', 4000))
+    temp  = float(data.get('temp', 35))
+    mode  = data.get('mode', 'manual')
+
+    try:
+        if mode == 'manual':
+            rms      = float(data.get('rms', 0.5))
+            kurt     = float(data.get('kurtosis', 3.0))
+            dom_freq = float(data.get('dominant_freq', 120.0))
+            env_rms  = float(data.get('envelope_rms', 0.3))
+
+            features, sig_h, sig_v = _build_features_from_manual(
+                rms, kurt, dom_freq, env_rms, speed, load, temp
+            )
+            plot_b64 = _generate_signal_plot(sig_h, sig_v)
+        else:
+            return jsonify({'error': 'Compare mode only supports manual input'}), 400
+
+        results = {}
+        for mt in ['rf', 'xgb']:
+            try:
+                r = _predict_features(features.copy(), mt, speed, load, temp)
+                r['plot_b64'] = plot_b64
+                results[mt] = r
+            except Exception as e:
+                results[mt] = {'error': str(e)}
+
+        # Ensemble: average of the two
+        if 'error' not in results.get('rf', {}) and 'error' not in results.get('xgb', {}):
+            rf_rul = results['rf']['predicted_rul']
+            xgb_rul = results['xgb']['predicted_rul']
+
+            # Weighted average by validation R² if available
+            rf_ckpt = load_model('rf')
+            xgb_ckpt = load_model('xgb')
+            rf_r2 = rf_ckpt.get('val_metrics', {}).get('r2', 0.5) if rf_ckpt else 0.5
+            xgb_r2 = xgb_ckpt.get('val_metrics', {}).get('r2', 0.5) if xgb_ckpt else 0.5
+            total_r2 = rf_r2 + xgb_r2
+            w_rf = rf_r2 / total_r2 if total_r2 > 0 else 0.5
+            w_xgb = xgb_r2 / total_r2 if total_r2 > 0 else 0.5
+
+            ens_rul = round(rf_rul * w_rf + xgb_rul * w_xgb, 1)
+            ens_status, ens_badge = rul_to_status(ens_rul)
+            ens_pct = round((ens_rul / config.RUL_CAP) * 100, 1) if config.RUL_CAP else 0
+
+            results['ensemble'] = {
+                'predicted_rul': ens_rul,
+                'rul_pct': ens_pct,
+                'status': ens_status,
+                'status_badge': ens_badge,
+                'model_used': 'ENSEMBLE',
+                'speed': speed,
+                'load': load,
+                'temp': temp,
+                'n_features': results['rf'].get('n_features', 0),
+                'weights': {'rf': round(w_rf, 3), 'xgb': round(w_xgb, 3)},
+                'plot_b64': plot_b64,
+            }
+
+            # Ensemble confidence if both have CI
+            rf_ci = results['rf'].get('confidence_interval')
+            xgb_ci = results['xgb'].get('confidence_interval')
+            if rf_ci and xgb_ci:
+                results['ensemble']['confidence_interval'] = {
+                    'ci_lower': round(min(rf_ci['ci_lower'], xgb_ci['ci_lower']), 1),
+                    'ci_upper': round(max(rf_ci['ci_upper'], xgb_ci['ci_upper']), 1),
+                    'ci_std': round((rf_ci['ci_std'] + xgb_ci['ci_std']) / 2, 1),
+                    'ci_method': 'Ensemble Range',
+                }
+
+        return jsonify(results)
+
+    except Exception as e:
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+# ─── NEW: Ensemble Prediction Endpoint ────────────────────────────────────────
+
+@app.route('/api/predict/ensemble', methods=['POST'])
+def predict_ensemble():
+    """Average RF + XGBoost predictions, weighted by validation R²."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    speed = float(data.get('speed', 1800))
+    load  = float(data.get('load', 4000))
+    temp  = float(data.get('temp', 35))
+    rms      = float(data.get('rms', 0.5))
+    kurt     = float(data.get('kurtosis', 3.0))
+    dom_freq = float(data.get('dominant_freq', 120.0))
+    env_rms  = float(data.get('envelope_rms', 0.3))
+
+    try:
+        features, sig_h, sig_v = _build_features_from_manual(
+            rms, kurt, dom_freq, env_rms, speed, load, temp
+        )
+        plot_b64 = _generate_signal_plot(sig_h, sig_v)
+
+        rf_result = _predict_features(features.copy(), 'rf', speed, load, temp)
+        xgb_result = _predict_features(features.copy(), 'xgb', speed, load, temp)
+
+        # Weighted average
+        rf_ckpt = load_model('rf')
+        xgb_ckpt = load_model('xgb')
+        rf_r2 = rf_ckpt.get('val_metrics', {}).get('r2', 0.5) if rf_ckpt else 0.5
+        xgb_r2 = xgb_ckpt.get('val_metrics', {}).get('r2', 0.5) if xgb_ckpt else 0.5
+        total = rf_r2 + xgb_r2
+        w_rf = rf_r2 / total if total > 0 else 0.5
+        w_xgb = xgb_r2 / total if total > 0 else 0.5
+
+        ens_rul = round(rf_result['predicted_rul'] * w_rf + xgb_result['predicted_rul'] * w_xgb, 1)
+        ens_status, ens_badge = rul_to_status(ens_rul)
+
+        result = {
+            'predicted_rul': ens_rul,
+            'rul_pct': round((ens_rul / config.RUL_CAP) * 100, 1),
+            'status': ens_status,
+            'status_badge': ens_badge,
+            'model_used': 'ENSEMBLE',
+            'speed': speed, 'load': load, 'temp': temp,
+            'n_features': rf_result.get('n_features', 0),
+            'plot_b64': plot_b64,
+            'weights': {'rf': round(w_rf, 3), 'xgb': round(w_xgb, 3)},
+            'rf_rul': rf_result['predicted_rul'],
+            'xgb_rul': xgb_result['predicted_rul'],
+            'confidence_interval': rf_result.get('confidence_interval'),
+        }
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500
+
+
+# ─── Helper: Build features from manual inputs ───────────────────────────────
+
+def _build_features_from_manual(rms, kurt, dom_freq, env_rms, speed, load, temp):
+    """Synthesize vibration signal and extract features."""
+    fs = config.SAMPLE_RATE
+    t  = np.linspace(0, 1, fs)
+    noise = np.random.randn(fs) * rms
+    sinusoidal = rms * np.sin(2 * np.pi * dom_freq * t)
