@@ -541,3 +541,185 @@ def _build_features_from_manual(rms, kurt, dom_freq, env_rms, speed, load, temp)
     t  = np.linspace(0, 1, fs)
     noise = np.random.randn(fs) * rms
     sinusoidal = rms * np.sin(2 * np.pi * dom_freq * t)
+    sig_h = noise + sinusoidal
+    sig_v = noise * 0.9 + sinusoidal * 0.85
+
+    sig_h = sig_h / (np.std(sig_h) + 1e-8) * rms
+    sig_v = sig_v / (np.std(sig_v) + 1e-8) * rms * 0.9
+
+    window_size = config.WINDOW_SIZE
+    sig_h = sig_h[:window_size]
+    sig_v = sig_v[:window_size]
+
+    vibration = np.stack([sig_h, sig_v], axis=0)
+    features  = extract_all_features(vibration, fs=fs)
+
+    if config.USE_OPERATING_CONDITIONS:
+        features = np.concatenate([features, [
+            speed / config.MAX_SPEED,
+            load  / config.MAX_LOAD,
+            temp  / config.MAX_TEMP
+        ]])
+
+    return features, sig_h, sig_v
+
+
+# ─── Helper prediction functions ─────────────────────────────────────────────
+
+def _predict_from_csv(csv_path, model_type, speed, load, temp):
+    ckpt = load_model(model_type)
+    if ckpt is None:
+        raise ValueError(f"Model '{model_type}' not found. Train the model first.")
+
+    model  = ckpt['model']
+    scaler = ckpt['scaler']
+    cfg    = ckpt.get('config', config)
+
+    df = pd.read_csv(csv_path)
+
+    # Auto-detect columns
+    h_col = next((c for c in df.columns if 'horiz' in c.lower() or 'horizontal' in c.lower()), None)
+    v_col = next((c for c in df.columns if 'vert'  in c.lower() or 'vertical'   in c.lower()), None)
+    if h_col is None or v_col is None:
+        if len(df.columns) >= 2:
+            h_col, v_col = df.columns[0], df.columns[1]
+        elif len(df.columns) == 1:
+            h_col = v_col = df.columns[0]
+        else:
+            raise ValueError("CSV must have at least one column")
+
+    sig_h = df[h_col].dropna().values.astype(np.float32)
+    sig_v = df[v_col].dropna().values.astype(np.float32) if h_col != v_col else sig_h.copy()
+
+    if len(sig_h) != config.SAMPLE_RATE:
+        sig_h = resample(sig_h, config.SAMPLE_RATE)
+        sig_v = resample(sig_v, config.SAMPLE_RATE)
+
+    window_size = config.WINDOW_SIZE
+    if len(sig_h) >= window_size:
+        start = (len(sig_h) - window_size) // 2
+        sig_h = sig_h[start:start + window_size]
+        sig_v = sig_v[start:start + window_size]
+
+    vibration = np.stack([sig_h, sig_v], axis=0)
+    features  = extract_all_features(vibration, fs=config.SAMPLE_RATE)
+
+    if config.USE_OPERATING_CONDITIONS:
+        features = np.concatenate([features, [
+            speed / config.MAX_SPEED,
+            load  / config.MAX_LOAD,
+            temp  / config.MAX_TEMP
+        ]])
+
+    plot_b64 = _generate_signal_plot(sig_h, sig_v)
+    result = _predict_features(features, model_type, speed, load, temp, model, scaler, cfg)
+    result['plot_b64'] = plot_b64
+    return result
+
+
+def _generate_signal_plot(sig_h, sig_v):
+    fig, ax = plt.subplots(figsize=(6, 2.5), facecolor='none')
+    ax.plot(sig_h, label='Horiz', alpha=0.9, color='#6F8F72', linewidth=1)
+    ax.plot(sig_v, label='Vert', alpha=0.9, color='#F2A65A', linewidth=1)
+    ax.set_facecolor('none')
+    ax.tick_params(colors='#8a9490', labelsize=8)
+    for spine in ax.spines.values():
+        spine.set_color('#8a9490')
+        spine.set_alpha(0.3)
+    ax.legend(loc='upper right', fontsize=8, framealpha=0.2)
+    plt.tight_layout()
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', transparent=True, dpi=100)
+    plt.close()
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode('utf-8')
+
+
+def _predict_features(features, model_type, speed, load, temp,
+                       model=None, scaler=None, cfg=None):
+    ckpt = None
+    if model is None:
+        ckpt = load_model(model_type)
+        if ckpt is None:
+            raise ValueError(f"Model '{model_type}' not found.")
+        model  = ckpt['model']
+        scaler = ckpt['scaler']
+        cfg    = ckpt.get('config', config)
+
+    features_scaled = scaler.transform(features.reshape(1, -1))
+    raw_pred        = model.predict(features_scaled)
+    predicted_rul   = float(inverse_transform_rul(raw_pred, cfg)[0])
+    predicted_rul   = max(0.0, min(predicted_rul, float(cfg.PRED_MAX)))
+
+    status, badge = rul_to_status(predicted_rul)
+    pct = (predicted_rul / cfg.RUL_CAP) * 100 if cfg.RUL_CAP else 0
+
+    result = {
+        'predicted_rul': round(predicted_rul, 1),
+        'rul_pct': round(pct, 1),
+        'status': status,
+        'status_badge': badge,
+        'model_used': model_type.upper(),
+        'speed': speed,
+        'load': load,
+        'temp': temp,
+        'n_features': int(len(features)),
+    }
+
+    # ── Confidence Interval ──
+    ci = _get_confidence_interval(model, model_type, features_scaled, cfg)
+    if ci:
+        result['confidence_interval'] = ci
+
+    # ── SHAP Explanation ──
+    shap_result = _get_shap_explanation(model, model_type, features_scaled, FEATURE_NAMES)
+    if shap_result:
+        result['shap'] = shap_result
+
+    return result
+
+
+# ─── NEW: Batch CSV Prediction ────────────────────────────────────────────────
+
+@app.route('/api/predict/batch', methods=['POST'])
+def predict_batch():
+    """Predict RUL for multiple uploaded CSV files."""
+    if 'files[]' not in request.files:
+        return jsonify({'error': 'No files uploaded'}), 400
+
+    files = request.files.getlist('files[]')
+    if not files:
+        return jsonify({'error': 'Empty file list'}), 400
+
+    model_type = request.form.get('model', 'rf')
+    speed = float(request.form.get('speed', 1800))
+    load  = float(request.form.get('load', 4000))
+    temp  = float(request.form.get('temp', 35))
+
+    results = []
+    for file in files:
+        fname = secure_filename(file.filename)
+        if not fname:
+            continue
+        save_path = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+        try:
+            file.save(save_path)
+            r = _predict_from_csv(save_path, model_type, speed, load, temp)
+            # Don't include heavy base64 plots for batch results
+            r.pop('plot_b64', None)
+            r.pop('shap', None)
+            r['filename'] = fname
+            results.append(r)
+        except Exception as e:
+            results.append({'filename': fname, 'error': str(e)})
+        finally:
+            if os.path.exists(save_path):
+                os.remove(save_path)
+
+    return jsonify({'results': results, 'count': len(results)})
+
+
+if __name__ == '__main__':
+    print("Starting RUL Dashboard on http://localhost:5000")
+    app.run(debug=False, host='0.0.0.0', port=5000)
