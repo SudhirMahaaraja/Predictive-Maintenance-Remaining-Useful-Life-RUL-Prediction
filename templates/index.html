@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bearing RUL Prediction Dashboard</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png" />
+    <meta name="description"
+        content="Interactive dashboard for Bearing Remaining Useful Life (RUL) prediction using Random Forest and XGBoost models with full EDA analysis." />
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+    <!-- Google Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=3.1" />
+</head>
+
+<body>
+
+    <!-- ──── SIDEBAR ──────────────────────────────────────────────────────────── -->
+    <nav id="sidebar" class="sidebar d-flex flex-column">
+        <div class="sidebar-brand">
+            <div class="brand-icon"><i class="bi bi-cpu-fill"></i></div>
+            <div>
+                <div class="brand-title">BearingRUL</div>
+                <div class="brand-sub">AI Prediction System</div>
+            </div>
+        </div>
+
+        <ul class="nav flex-column sidebar-nav mt-3">
+            <li class="nav-item">
+                <a class="nav-link active" href="#" data-section="overview" id="nav-overview">
+                    <i class="bi bi-grid-3x3-gap-fill"></i> Overview
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-section="eda" id="nav-eda">
+                    <i class="bi bi-graph-up-arrow"></i> EDA &amp; Analysis
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-section="models" id="nav-models">
+                    <i class="bi bi-diagram-3-fill"></i> Model Performance
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-section="predict" id="nav-predict">
+                    <i class="bi bi-lightning-charge-fill"></i> Predict RUL
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="#" data-section="history" id="nav-history">
+                    <i class="bi bi-clock-history"></i> History
+                    <span class="badge bg-primary ms-auto d-none" id="history-count-badge"
+                        style="font-size:10px">0</span>
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- ──── MAIN CONTENT ──────────────────────────────────────────────────────── -->
+    <div id="main-content" class="main-content">
+
+        <!-- Header -->
+        <header class="dash-header d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-3">
+                <button class="btn btn-ghost" id="sidebar-toggle" title="Toggle Sidebar">
+                    <i class="bi bi-list fs-4"></i>
+                </button>
+                <div>
+                    <h1 class="page-title mb-0" id="page-heading">Overview</h1>
+                    <div class="page-sub" id="page-sub">Bearing Health Intelligence Dashboard</div>
+                </div>
+            </div>
+            <div class="d-flex align-items-center gap-3">
+                <div class="status-pill" id="system-status">
+                    <span class="pulse-dot"></span> System Ready
+                </div>
+                <button class="btn btn-theme-toggle" id="btn-theme-toggle" title="Toggle Light / Dark Mode">
+                    <i class="bi bi-sun-fill" id="theme-icon"></i>
+                </button>
+                <button class="btn btn-primary btn-sm" id="btn-refresh-eda" title="Re-run EDA">
+                    <i class="bi bi-arrow-clockwise"></i> Refresh EDA
+                </button>
+            </div>
+        </header>
+
+        <!-- ════ OVERVIEW SECTION ════ -->
+        <section id="section-overview" class="dash-section active">
+            <!-- KPI Cards -->
+            <div class="row g-3 mb-4" id="kpi-row">
+                <div class="col-6 col-md-3">
+                    <div class="kpi-card" id="kpi-bearings">
+                        <div class="kpi-icon" style="background:linear-gradient(135deg,#6F8F72,#4a6b4d)"><i
+                                class="bi bi-gear-wide-connected"></i></div>
+                        <div class="kpi-val" id="kv-bearings">—</div>
+                        <div class="kpi-label">Total Bearings</div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="kpi-card" id="kpi-samples">
+                        <div class="kpi-icon" style="background:linear-gradient(135deg,#F2A65A,#d4853a)"><i
+                                class="bi bi-database-fill"></i></div>
+                        <div class="kpi-val" id="kv-samples">—</div>
+                        <div class="kpi-label">Total Samples</div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="kpi-card" id="kpi-features">
+                        <div class="kpi-icon" style="background:linear-gradient(135deg,#BFC6C4,#8a9d9a)"><i
+                                class="bi bi-sliders"></i></div>
+                        <div class="kpi-val" id="kv-features">—</div>
+                        <div class="kpi-label">Feature Dimensions</div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="kpi-card" id="kpi-rul">
+                        <div class="kpi-icon" style="background:linear-gradient(135deg,#5a7a5d,#3d5940)"><i
+                                class="bi bi-clock-history"></i></div>
+                        <div class="kpi-val" id="kv-rulmean">—</div>
+                        <div class="kpi-label">Mean RUL (cycles)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Health Status Breakdown -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="dash-card h-100">
+                        <div class="dash-card-header">
+                            <i class="bi bi-heart-pulse-fill text-danger"></i> Fleet Health
+                        </div>
+                        <div class="dash-card-body d-flex flex-column align-items-center justify-content-center"
+                            style="padding: 12px 14px;">
+                            <canvas id="health-donut" width="200" height="200" style="max-width:200px"></canvas>
+                            <div class="d-flex gap-3 mt-2" id="health-legend"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-8">
+                    <div class="dash-card h-100">
+                        <div class="dash-card-header">
+                            <i class="bi bi-info-circle-fill text-primary"></i> Dataset Summary
+                        </div>
+                        <div class="dash-card-body">
+                            <table class="table table-dark table-sm table-hover mb-0" id="summary-table">
+                                <tbody id="summary-tbody">
+                                    <tr>
+                                        <td colspan="2" class="text-center text-muted py-4">
+                                            <div class="spinner-border spinner-border-sm"></div> Loading EDA…
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EDA loading notice -->
+            <div id="eda-loading-banner" class="alert alert-info d-none" role="alert">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="spinner-border spinner-border-sm flex-shrink-0"></div>
+                    <div><strong>EDA is running…</strong> Generating plots in the background. This may take a few
+                        minutes.
+                        <span id="eda-timer" class="ms-2 text-secondary small"></span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ════ EDA SECTION ════ -->
+        <section id="section-eda" class="dash-section">
+            <div id="eda-spinner" class="text-center py-5 d-none">
+                <div class="spinner-border text-primary mb-3" style="width:3rem;height:3rem"></div>
+                <p class="text-secondary">Running exploratory data analysis…<br>
+                    <small>This may take 1–3 minutes on first run.</small>
+                </p>
+            </div>
+
+            <!-- EDA Plot tabs -->
+            <ul class="nav nav-pills eda-tabs mb-4" id="eda-tabs" role="tablist">
+                <li class="nav-item"><button class="nav-link active" data-plot="dataset_overview">
+                        <i class="bi bi-pie-chart-fill"></i> Dataset
+                    </button></li>
+                <li class="nav-item"><button class="nav-link" data-plot="signal_analysis">
+                        <i class="bi bi-activity"></i> Signals
+                    </button></li>
+                <li class="nav-item"><button class="nav-link" data-plot="feature_stats">
+                        <i class="bi bi-bar-chart-fill"></i> Features
+                    </button></li>
+                <li class="nav-item"><button class="nav-link" data-plot="correlation">
+                        <i class="bi bi-grid-fill"></i> Correlation
+                    </button></li>
+                <li class="nav-item"><button class="nav-link" data-plot="degradation">
+                        <i class="bi bi-graph-down-arrow"></i> Degradation
+                    </button></li>
+                <li class="nav-item"><button class="nav-link" data-plot="operating_conditions">
+                        <i class="bi bi-speedometer2"></i> Conditions
+                    </button></li>
+                <li class="nav-item"><button class="nav-link" data-plot="feature_importance">
+                        <i class="bi bi-trophy-fill"></i> Importance
+                    </button></li>
+                <li class="nav-item"><button class="nav-link" data-plot="outlier_analysis">
+                        <i class="bi bi-exclamation-triangle-fill"></i> Outliers
+                    </button></li>
+            </ul>
+
+            <div class="dash-card">
+                <div class="dash-card-header" id="eda-plot-title">Dataset Overview</div>
+                <div class="dash-card-body p-2 p-md-3">
+                    <div id="eda-plot-container" class="text-center">
+                        <p class="text-muted py-5">Click <strong>Refresh EDA</strong> to generate plots, or wait for
+                            auto-load.</p>
+                    </div>
+                </div>
+                <!-- Plot description + abbreviations footer -->
+                <div class="plot-info">
+                    <div id="eda-plot-description" class="plot-desc-line1">&#8505;&#65039; <em>Select a tab above to see
+                            its description.</em></div>
+                    <div id="eda-plot-desc-line2" class="plot-desc-line2"></div>
+                    <div id="eda-plot-abbr" class="plot-abbr-row"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ════ MODEL PERFORMANCE SECTION ════ -->
+        <section id="section-models" class="dash-section">
+            <div class="row g-3 mb-4">
