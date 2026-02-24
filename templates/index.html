@@ -468,3 +468,238 @@
                                 <!-- Operating Conditions -->
                                 <div class="mb-2">
                                     <div class="d-flex align-items-center gap-2 mb-1">
+                                        <i class="bi bi-gear-fill text-primary"></i>
+                                        <h6 class="mb-0">Operating Conditions</h6>
+                                    </div>
+                                    <div class="text-muted small mb-3">Specify the machine's running state when the
+                                        vibration data was recorded.</div>
+                                </div>
+
+                                <div class="row g-2 mb-4">
+                                    <div class="col-4">
+                                        <label class="form-label text-muted small"
+                                            title="Rotational speed of the shaft">Speed (RPM)</label>
+                                        <input type="number" class="form-control form-control-dark" id="csv-speed"
+                                            value="1800" min="0" max="5000" />
+                                    </div>
+                                    <div class="col-4">
+                                        <label class="form-label text-muted small"
+                                            title="Radial load applied to the bearing">Load (N)</label>
+                                        <input type="number" class="form-control form-control-dark" id="csv-load"
+                                            value="4000" min="0" max="20000" />
+                                    </div>
+                                    <div class="col-4">
+                                        <label class="form-label text-muted small"
+                                            title="Bearing operating temperature">Temp (°C)</label>
+                                        <input type="number" class="form-control form-control-dark" id="csv-temp"
+                                            value="35" min="-10" max="120" />
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted small">Model</label>
+                                    <select class="form-select form-control-dark" id="csv-model">
+                                        <option value="rf">Random Forest</option>
+                                        <option value="xgb">XGBoost</option>
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100" id="btn-predict-csv">
+                                    <i class="bi bi-lightning-charge-fill"></i> Predict RUL
+                                </button>
+
+                                <!-- Batch Upload -->
+                                <div class="mt-4 pt-3" style="border-top: 1px solid var(--border)">
+                                    <div class="d-flex align-items-center gap-2 mb-2">
+                                        <i class="bi bi-collection-fill" style="color:#F2A65A"></i>
+                                        <h6 class="mb-0" style="font-size:13px">Batch Upload (Multiple CSVs)</h6>
+                                    </div>
+                                    <div class="upload-zone mb-2" id="batch-upload-zone" style="padding:16px 12px">
+                                        <i class="bi bi-files fs-4 mb-1"></i>
+                                        <div class="small fw-semibold">Drop multiple CSVs or click to browse</div>
+                                        <input type="file" id="batch-file-input" accept=".csv" multiple
+                                            class="d-none" />
+                                        <div id="batch-file-info" class="mt-1 text-info small"></div>
+                                    </div>
+                                    <button type="button" class="btn btn-warning w-100 btn-sm d-none"
+                                        id="btn-batch-predict">
+                                        <i class="bi bi-play-fill"></i> Run Batch Prediction
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Manual Mode -->
+                    <div id="mode-manual" class="dash-card d-none">
+                        <div class="dash-card-header"><i class="bi bi-sliders text-warning"></i> Enter Signal Parameters
+                        </div>
+                        <div class="dash-card-body">
+                            <form id="manual-form">
+                                <div class="mb-2 mt-1">
+                                    <div class="d-flex align-items-center gap-2 mb-1">
+                                        <i class="bi bi-activity text-warning"></i>
+                                        <h6 class="mb-0">Virtual Signal Generator</h6>
+                                    </div>
+                                    <div class="text-muted small mb-3">Adjust these parameters to synthesize a vibration
+                                        signal.</div>
+                                </div>
+
+                                <div class="fw-semibold mb-2"
+                                    style="font-size: 13px; border-bottom: 1px solid var(--border); padding-bottom: 4px;">
+                                    Signal Features</div>
+                                <div class="row g-2 mb-3">
+                                    <div class="col-6">
+                                        <label class="form-label text-muted small"
+                                            title="Root Mean Square - reflects overall vibration energy">Vibration
+                                            RMS</label>
+                                        <input type="number" step="0.01" class="form-control form-control-dark"
+                                            id="m-rms" value="0.5" min="0.01" />
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label text-muted small"
+                                            title="Sensitivity to sharp impulse peaks">Kurtosis</label>
+                                        <input type="number" step="0.1" class="form-control form-control-dark"
+                                            id="m-kurtosis" value="3.0" min="1" />
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label text-muted small"
+                                            title="Primary frequency component">Dominant Freq (Hz)</label>
+                                        <input type="number" class="form-control form-control-dark" id="m-domfreq"
+                                            value="120" min="1" max="5000" />
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label text-muted small"
+                                            title="RMS of the signal envelope">Envelope RMS</label>
+                                        <input type="number" step="0.01" class="form-control form-control-dark"
+                                            id="m-envrms" value="0.3" min="0" />
+                                    </div>
+                                </div>
+
+                                <div class="fw-semibold mb-2 mt-4"
+                                    style="font-size: 13px; border-bottom: 1px solid var(--border); padding-bottom: 4px;">
+                                    Operating Conditions</div>
+                                <div class="row g-2 mb-4">
+                                    <div class="col-4">
+                                        <label class="form-label text-muted small">Speed (RPM)</label>
+                                        <input type="number" class="form-control form-control-dark" id="m-speed"
+                                            value="1800" />
+                                    </div>
+                                    <div class="col-4">
+                                        <label class="form-label text-muted small">Load (N)</label>
+                                        <input type="number" class="form-control form-control-dark" id="m-load"
+                                            value="4000" />
+                                    </div>
+                                    <div class="col-4">
+                                        <label class="form-label text-muted small">Temp (°C)</label>
+                                        <input type="number" class="form-control form-control-dark" id="m-temp"
+                                            value="35" />
+                                    </div>
+                                </div>
+                                <div class="mb-3 mt-4">
+                                    <label class="form-label text-muted small">Model</label>
+                                    <select class="form-select form-control-dark" id="m-model">
+                                        <option value="rf">Random Forest</option>
+                                        <option value="xgb">XGBoost</option>
+                                        <option value="ensemble">Ensemble (RF + XGBoost)</option>
+                                    </select>
+                                </div>
+
+                                <!-- RMS Slider -->
+                                <div class="mb-2">
+                                    <label class="form-label text-muted small d-flex justify-content-between">
+                                        <span>RMS Slider</span><span id="rms-slider-val" class="text-info">0.50</span>
+                                    </label>
+                                    <input type="range" class="form-range range-custom" id="rms-slider" min="0.01"
+                                        max="5" step="0.01" value="0.5" />
+                                </div>
+
+                                <button type="submit" class="btn btn-warning w-100 text-dark fw-semibold mb-2"
+                                    id="btn-predict-manual">
+                                    <i class="bi bi-lightning-charge-fill"></i> Predict RUL
+                                </button>
+
+                                <!-- Compare Both Models Button -->
+                                <button type="button" class="btn btn-outline-compare w-100" id="btn-compare-models">
+                                    <i class="bi bi-layout-split"></i> Compare RF vs XGBoost
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Result Panel (full width, stacked below) -->
+                <div>
+                    <div class="dash-card">
+                        <div class="dash-card-header"><i class="bi bi-clipboard-data-fill text-success"></i> 📋 Your
+                            Results</div>
+                        <div class="dash-card-body d-flex flex-column align-items-center justify-content-center"
+                            id="result-panel" style="min-height:200px">
+                            <div class="text-center text-muted py-5">
+                                <i class="bi bi-arrow-up-circle fs-2 d-block mb-2" style="opacity:0.4"></i>
+                                Pick a mode above, upload data or enter values, then hit <b>Get Prediction</b> ✨
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ════ HISTORY SECTION ════ -->
+        <section id="section-history" class="dash-section">
+            <div class="dash-card">
+                <div class="dash-card-header">
+                    <i class="bi bi-clock-history text-primary"></i> Prediction History
+                </div>
+                <div class="dash-card-body" id="history-container">
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-clock-history fs-1 d-block mb-3" style="opacity:0.3"></i>
+                        <p>No predictions yet. Run a prediction to see it logged here.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </div><!-- /main-content -->
+
+    <!-- Modal: Error -->
+    <div class="modal fade" id="error-modal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background:var(--bg-card);border:1px solid rgba(232,80,80,0.3)">
+                <div class="modal-header" style="border-color:rgba(232,80,80,0.2)">
+                    <h5 class="modal-title" style="color:#e85050"><i class="bi bi-exclamation-triangle-fill"></i>
+                        Something went wrong</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" style="color:var(--text-primary)" id="error-msg"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Confirm Clear History -->
+    <div class="modal fade" id="confirm-clear-modal" tabindex="-1">
+        <div class="modal-dialog modal-sm modal-dialog-centered">
+            <div class="modal-content" style="background:var(--bg-card);border:1px solid rgba(232,80,80,0.3)">
+                <div class="modal-header" style="border-color:rgba(232,80,80,0.2)">
+                    <h6 class="modal-title" style="color:#e85050"><i class="bi bi-trash3"></i> Clear History?</h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center" style="color:var(--text-primary)">
+                    <p class="mb-0">This will erase all your saved predictions.<br><span class="small text-muted">This
+                            can't be undone!</span></p>
+                </div>
+                <div class="modal-footer justify-content-center" style="border-color:rgba(232,80,80,0.2)">
+                    <button type="button" class="btn btn-sm"
+                        style="background:var(--bg-card2);color:var(--text-muted);border:1px solid var(--border)"
+                        data-bs-dismiss="modal">Never mind</button>
+                    <button type="button" class="btn btn-sm" id="btn-confirm-clear"
+                        style="background:rgba(232,80,80,0.2);color:#e85050;border:1px solid rgba(232,80,80,0.3)">Yes,
+                        clear it</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/dashboard.js?v=3.1"></script>
+</body>
+
+</html>
