@@ -1268,3 +1268,638 @@ body.light-mode .mg-acc-note {
   color: #3a4a40;
 }
 
+/* ────────── Abbreviation pills (EDA footer) ──────────────────────────── */
+.abbr-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(144, 144, 192, 0.2);
+}
+
+.abbr-heading {
+  color: #6F8F72;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+body.light-mode .abbr-heading {
+  color: #3d6641;
+}
+
+.abbr-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.abbr-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  background: rgba(111, 143, 114, 0.10);
+  border: 1px solid rgba(111, 143, 114, 0.25);
+  border-radius: 5px;
+  padding: 3px 8px;
+  cursor: default;
+}
+
+body.light-mode .abbr-pill {
+  background: rgba(111, 143, 114, 0.08);
+  border-color: rgba(111, 143, 114, 0.30);
+}
+
+.abbr-key {
+  color: #6F8F72;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+body.light-mode .abbr-key {
+  color: #3d6641;
+}
+
+.abbr-def {
+  color: #9090b0;
+  font-size: 11px;
+}
+
+body.light-mode .abbr-def {
+  color: #5a6a60;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   NEW ENHANCEMENTS — v3.0
+══════════════════════════════════════════════════════════════════════════════ */
+
+/* ────────── Confidence Interval Card ─────────────────────────────────────── */
+.ci-card {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden
+}
+
+.ci-header {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6F8F72;
+  background: rgba(111, 143, 114, .08);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px
+}
+
+.ci-method {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 400
+}
+
+.ci-body {
+  padding: 12px 14px
+}
+
+.ci-range {
+  display: flex;
+  align-items: center;
+  gap: 10px
+}
+
+.ci-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap
+}
+
+.ci-lower {
+  color: #F2A65A
+}
+
+.ci-upper {
+  color: #6F8F72
+}
+
+.ci-bar-wrap {
+  flex: 1;
+  min-width: 0
+}
+
+.ci-bar-track {
+  position: relative;
+  height: 8px;
+  background: rgba(255, 255, 255, .07);
+  border-radius: 4px;
+  overflow: visible
+}
+
+.ci-bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(242, 166, 90, .5), rgba(111, 143, 114, .5));
+  border-radius: 4px
+}
+
+.ci-bar-marker {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 14px;
+  background: #E8E2D8;
+  border-radius: 2px;
+  transform: translateX(-50%)
+}
+
+.ci-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 2px
+}
+
+.ci-detail {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted)
+}
+
+body.light-mode .ci-card {
+  background: #f5f2ed;
+  border-color: rgba(111, 143, 114, .22)
+}
+
+body.light-mode .ci-header {
+  background: rgba(111, 143, 114, .06);
+  color: #3d6641
+}
+
+body.light-mode .ci-bar-track {
+  background: rgba(0, 0, 0, .08)
+}
+
+body.light-mode .ci-bar-marker {
+  background: #2a302d
+}
+
+body.light-mode .ci-lower {
+  color: #b06a1a
+}
+
+body.light-mode .ci-upper {
+  color: #3d6641
+}
+
+/* ────────── SHAP Explanation ─────────────────────────────────────────────── */
+.shap-card {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px
+}
+
+.shap-feat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px
+}
+
+.shap-feat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px
+}
+
+.shap-feat-row.positive {
+  background: rgba(111, 143, 114, .08)
+}
+
+.shap-feat-row.negative {
+  background: rgba(232, 80, 80, .08)
+}
+
+.shap-feat-name {
+  color: var(--text-primary);
+  font-weight: 500
+}
+
+.shap-feat-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600
+}
+
+.shap-base-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center
+}
+
+body.light-mode .shap-card {
+  background: #f5f2ed;
+  border-color: rgba(111, 143, 114, .22)
+}
+
+body.light-mode .shap-feat-name {
+  color: #2a302d
+}
+
+body.light-mode .shap-feat-row.positive {
+  background: rgba(111, 143, 114, .1)
+}
+
+body.light-mode .shap-feat-row.negative {
+  background: rgba(232, 80, 80, .1)
+}
+
+/* ────────── Side-by-Side Comparison ──────────────────────────────────────── */
+.compare-header {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--c2)
+}
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  padding: 0 8px
+}
+
+.compare-mini {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 12px;
+  text-align: center
+}
+
+.compare-model-label {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  letter-spacing: .5px
+}
+
+.compare-gauge {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 8px;
+  transition: box-shadow .4s
+}
+
+.compare-gauge.healthy {
+  background: radial-gradient(circle, rgba(111, 143, 114, .12), transparent);
+  box-shadow: 0 0 30px rgba(111, 143, 114, .25);
+  border: 2px solid rgba(111, 143, 114, .4)
+}
+
+.compare-gauge.degraded {
+  background: radial-gradient(circle, rgba(242, 166, 90, .12), transparent);
+  box-shadow: 0 0 30px rgba(242, 166, 90, .25);
+  border: 2px solid rgba(242, 166, 90, .4)
+}
+
+.compare-gauge.critical {
+  background: radial-gradient(circle, rgba(232, 80, 80, .12), transparent);
+  box-shadow: 0 0 30px rgba(232, 80, 80, .3);
+  border: 2px solid rgba(232, 80, 80, .5)
+}
+
+.compare-rul-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1
+}
+
+.compare-rul-unit {
+  font-size: 10px;
+  color: var(--text-muted)
+}
+
+.compare-ci {
+  font-size: 11px
+}
+
+.compare-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .07);
+  overflow: hidden
+}
+
+.ensemble-detail {
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px
+}
+
+body.light-mode .compare-header {
+  color: #2a302d
+}
+
+body.light-mode .compare-mini {
+  background: #f5f2ed;
+  border-color: rgba(111, 143, 114, .2)
+}
+
+body.light-mode .compare-progress-track {
+  background: rgba(0, 0, 0, .08)
+}
+
+body.light-mode .ensemble-detail {
+  background: #f5f2ed
+}
+
+/* ────────── Compare Button ───────────────────────────────────────────────── */
+.btn-outline-compare {
+  background: transparent;
+  border: 1.5px solid rgba(191, 198, 196, .35);
+  color: #BFC6C4;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  transition: all .25s
+}
+
+.btn-outline-compare:hover {
+  border-color: #BFC6C4;
+  color: #E8E2D8;
+  background: rgba(191, 198, 196, .1);
+  box-shadow: 0 4px 14px rgba(191, 198, 196, .2)
+}
+
+body.light-mode .btn-outline-compare {
+  border-color: rgba(111, 143, 114, .35);
+  color: #3d6641
+}
+
+body.light-mode .btn-outline-compare:hover {
+  border-color: #6F8F72;
+  color: #2a302d;
+  background: rgba(111, 143, 114, .08)
+}
+
+/* ────────── History Table ─────────────────────────────────────────────────── */
+.history-table {
+  font-size: 12.5px
+}
+
+.history-table thead th {
+  font-size: 10px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: #8a9490;
+  border-color: rgba(111, 143, 114, .15)
+}
+
+.history-row td {
+  padding: 8px 10px;
+  border-color: rgba(111, 143, 114, .1);
+  vertical-align: middle
+}
+
+.hist-cell-time {
+  white-space: nowrap
+}
+
+.hist-date {
+  font-size: 11px;
+  color: var(--text-primary);
+  font-weight: 600
+}
+
+.hist-time {
+  font-size: 10px;
+  color: var(--text-muted)
+}
+
+.hist-model-badge {
+  background: rgba(111, 143, 114, .12);
+  color: #6F8F72;
+  border: 1px solid rgba(111, 143, 114, .25);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace
+}
+
+.hist-rul-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700
+}
+
+.hist-rul-unit {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: 2px
+}
+
+.hist-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 4px
+}
+
+.hist-cell-ci {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted)
+}
+
+.hist-cell-conditions {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap
+}
+
+body.light-mode .history-table thead th {
+  color: #7a8a80
+}
+
+body.light-mode .hist-date {
+  color: #2a302d
+}
+
+body.light-mode .hist-model-badge {
+  background: rgba(111, 143, 114, .1);
+  color: #3d6641
+}
+
+/* ────────── Export Button ─────────────────────────────────────────────────── */
+.btn-export {
+  background: rgba(111, 143, 114, .1);
+  border: 1px solid rgba(111, 143, 114, .3);
+  color: #6F8F72;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all .25s;
+  padding: 6px 14px
+}
+
+.btn-export:hover {
+  background: rgba(111, 143, 114, .2);
+  color: #E8E2D8;
+  box-shadow: 0 4px 12px rgba(111, 143, 114, .25)
+}
+
+.btn-export i {
+  margin-right: 4px
+}
+
+body.light-mode .btn-export {
+  color: #3d6641;
+  border-color: rgba(111, 143, 114, .35)
+}
+
+body.light-mode .btn-export:hover {
+  background: rgba(111, 143, 114, .15);
+  color: #2a302d
+}
+
+/* ────────── Batch Upload ─────────────────────────────────────────────────── */
+.batch-results {
+  max-height: 400px;
+  overflow-y: auto
+}
+
+.batch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px
+}
+
+.batch-item:last-child {
+  border-bottom: none
+}
+
+.batch-fname {
+  flex: 1;
+  color: var(--text-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap
+}
+
+.batch-rul {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 13px
+}
+
+.batch-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0
+}
+
+.batch-progress {
+  margin-top: 8px
+}
+
+body.light-mode .batch-item {
+  border-color: rgba(111, 143, 114, .15)
+}
+
+body.light-mode .batch-fname {
+  color: #2a302d
+}
+
+/* ────────── Light Mode: Plot images filter ───────────────────────────────── */
+body.light-mode .eda-plot-img {
+  filter: invert(.88) hue-rotate(180deg);
+  border-color: rgba(111, 143, 114, .2)
+}
+
+body.light-mode #result-panel img.img-fluid {
+  filter: invert(.88) hue-rotate(180deg)
+}
+
+/* ────────── Light Mode: Prediction Result Overrides ──────────────────────── */
+body.light-mode .rul-val {
+  color: inherit
+}
+
+body.light-mode .rul-gauge.healthy {
+  background: radial-gradient(circle, rgba(111, 143, 114, .1), transparent);
+  box-shadow: 0 0 40px rgba(111, 143, 114, .2);
+  border-color: rgba(111, 143, 114, .4)
+}
+
+body.light-mode .rul-gauge.degraded {
+  background: radial-gradient(circle, rgba(242, 166, 90, .1), transparent);
+  box-shadow: 0 0 40px rgba(242, 166, 90, .2);
+  border-color: rgba(242, 166, 90, .4)
+}
+
+body.light-mode .rul-gauge.critical {
+  background: radial-gradient(circle, rgba(232, 80, 80, .08), transparent);
+  box-shadow: 0 0 40px rgba(232, 80, 80, .2);
+  border-color: rgba(232, 80, 80, .45)
+}
+
+body.light-mode .rul-progress-track {
+  background: rgba(0, 0, 0, .08)
+}
+
+body.light-mode .status-badge.healthy {
+  background: rgba(111, 143, 114, .12);
+  color: #3d6641;
+  border-color: rgba(111, 143, 114, .3)
+}
+
+body.light-mode .status-badge.degraded {
+  background: rgba(242, 166, 90, .12);
+  color: #b06a1a;
+  border-color: rgba(242, 166, 90, .3)
+}
+
+body.light-mode .status-badge.critical {
+  background: rgba(232, 80, 80, .1);
+  color: #c03030;
+  border-color: rgba(232, 80, 80, .3)
+}
+
+body.light-mode #result-panel .metric-cell {
+  background: #f5f2ed;
+  border-color: rgba(111, 143, 114, .18)
+}
+
+body.light-mode #result-panel .metric-cell div:first-child {
+  color: #2a302d !important
+}
+
+body.light-mode #result-panel .metric-cell div:last-child {
+  color: #7a8a80 !important
+}
+
+body.light-mode .shap-base-note {
+  color: #7a8a80
+}
