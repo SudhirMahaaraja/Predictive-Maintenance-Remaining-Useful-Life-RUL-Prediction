@@ -324,3 +324,329 @@ function setEdaDescription(plotKey) {
   const abbrEl = $('eda-plot-abbr');
   if (!descEl) return;
 
+  const desc = PLOT_DESCRIPTIONS[plotKey] || '';
+  const parts = desc.split('\n');
+  descEl.textContent = '\u2139\ufe0f ' + (parts[0] || desc);
+  if (desc2El) desc2El.textContent = parts[1] || '';
+
+  if (!abbrEl) return;
+  const abbrs = PLOT_ABBREVIATIONS[plotKey] || [];
+  if (abbrs.length === 0) { abbrEl.innerHTML = ''; return; }
+  abbrEl.innerHTML = abbrs.map(([abbr, meaning]) =>
+    `<span class="plot-abbr-pill" title="${meaning}"><b>${abbr}</b> = ${meaning}</span>`
+  ).join('');
+}
+
+function renderEdaPlot(plotKey) {
+  const container = $('eda-plot-container');
+  setEdaDescription(plotKey);
+  if (!state.edaData) {
+    container.innerHTML = '<p class="text-muted py-5">EDA not loaded. Click <b>Refresh EDA</b>.</p>';
+    return;
+  }
+  const b64 = state.edaData.plots?.[plotKey];
+  if (!b64) {
+    container.innerHTML = `<p class="text-muted py-5">Plot "${plotKey}" not available.</p>`;
+    return;
+  }
+  container.innerHTML = `<img src="data:image/png;base64,${b64}" class="eda-plot-img" alt="${plotKey}"/>`;
+}
+
+
+// ─── Models ───────────────────────────────────────────────────────────────
+async function loadModels() {
+  try {
+    const resp = await fetch('/api/models');
+    state.modelsData = await resp.json();
+    renderModels(state.modelsData);
+  } catch (e) {
+    setHTML('rf-metrics-body', '<p class="text-danger">Failed to load model info.</p>');
+  }
+}
+
+function renderModels(data) {
+  const { models, test_results } = data;
+
+  renderModelCard('rf', models.rf, test_results?.random_forest);
+  renderModelCard('xgb', models.xgb, test_results?.xgboost);
+
+  // Epoch plot
+  if (state.edaData?.plots?.epoch_history) {
+    $('epoch-plot-container').innerHTML =
+      `<img src="data:image/png;base64,${state.edaData.plots.epoch_history}" class="eda-plot-img" alt="epoch"/>`;
+  } else {
+    $('epoch-plot-container').innerHTML =
+      '<p class="text-muted">Epoch history not available. Run training first.</p>';
+  }
+
+  // Prediction plots from EDA
+  const plots = state.edaData?.plots ?? {};
+
+  for (const [domId, key] of [
+    ['rf-val-plot', 'rf_val'],
+    ['xgb-val-plot', 'xgb_val'],
+    ['rf-test-plot', 'rf_test'],
+    ['xgb-test-plot', 'xgb_test'],
+  ]) {
+    const b64 = plots[key];
+    if (b64) {
+      $(domId).innerHTML = `<img src="data:image/png;base64,${b64}" class="eda-plot-img" alt="${key}"/>`;
+    }
+  }
+}
+
+function renderModelCard(type, info, testRes) {
+  const badgeId = `${type}-size-badge`;
+  const bodyId = `${type}-metrics-body`;
+  const color = type === 'rf' ? '#6F8F72' : '#F2A65A';
+
+  if (!info?.available) {
+    setText(badgeId, 'Not found');
+    setHTML(bodyId, '<p class="text-muted small">Model not trained yet. Run <code>train_rf.py</code>.</p>');
+    return;
+  }
+
+  setText(badgeId, `${info.size_mb} MB`);
+
+  const vm = info.val_metrics || {};
+  const tm = testRes?.test_metrics || {};
+
+  const metricsHtml = `
+    <div class="metrics-grid">
+      ${metCell('MAE', vm.mae ? vm.mae.toFixed(1) : '—', 'cycles', color)}
+      ${metCell('RMSE', vm.rmse ? vm.rmse.toFixed(1) : '—', 'cycles', color)}
+      ${metCell('R²', vm.r2 ? vm.r2.toFixed(4) : '—', '', color)}
+      ${metCell('MAPE', vm.mape ? vm.mape.toFixed(2) + '%' : '—', '', color)}
+    </div>
+    <div class="mb-3">
+      <div class="small text-muted mb-2 fw-semibold">Accuracy Bands (Validation)</div>
+      ${accBar('±50', vm.acc_50, color)}
+      ${accBar('±100', vm.acc_100, color)}
+      ${accBar('±200', vm.acc_200, color)}
+      ${accBar('±500', vm.acc_500, color)}
+      <div class="mt-2 p-2 rounded mg-acc-note">
+        <strong class="mg-warn">&#9432; Acc±N</strong> = % of predictions within ±N cycles of the true RUL (Remaining Useful Life).
+        Each band is a progressively looser tolerance — <strong class="mg-highlight">Acc±200 of ~30–55%</strong> is the industry norm for FEMTO / XJTU-SY datasets.
+        A high <strong class="mg-good">Acc±500</strong> and low <strong class="mg-good">MAE (Mean Absolute Error)</strong> matter most for real maintenance scheduling.
+      </div>
+    </div>
+    ${tm.mae ? `
+    <div class="small text-muted mb-2 fw-semibold">Test Set Results</div>
+    <div class="d-flex gap-2 flex-wrap">
+      ${pill('MAE', tm.mae.toFixed(1) + ' cyc')}
+      ${pill('RMSE', tm.rmse.toFixed(1) + ' cyc')}
+      ${pill('R²', tm.r2.toFixed(4))}
+      ${pill('Acc±200', tm.acc_200.toFixed(1) + '%')}
+    </div>` : ''}
+  `;
+
+  setHTML(bodyId, metricsHtml);
+}
+
+function metCell(label, val, unit, color) {
+  return `<div class="metric-cell">
+    <div class="metric-cell-val" style="color:${color}">${val}${unit ? '<span style="font-size:11px;color:#9090b0"> ' + unit + '</span>' : ''}</div>
+    <div class="metric-cell-label">${label}</div>
+  </div>`;
+}
+
+function accBar(label, pct, color) {
+  const val = pct ?? 0;
+  return `<div class="acc-bar-row">
+    <span class="acc-bar-label">${label}</span>
+    <div class="acc-bar-track">
+      <div class="acc-bar-fill" style="width:${val}%;background:${color}"></div>
+    </div>
+    <span class="acc-bar-pct">${val.toFixed(1)}%</span>
+  </div>`;
+}
+
+function pill(label, val) {
+  return `<span class="badge" style="background:rgba(111,143,114,0.15);color:#BFC6C4;border:1px solid rgba(111,143,114,0.25);font-family:'JetBrains Mono',monospace;font-size:11px">
+    ${label}: <b>${val}</b>
+  </span>`;
+}
+
+// ─── Prediction Mode Tabs ─────────────────────────────────────────────────
+document.querySelectorAll('.predict-tabs .nav-link').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.predict-tabs .nav-link').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.activeMode = btn.dataset.mode;
+    $('mode-csv').classList.toggle('d-none', btn.dataset.mode !== 'csv');
+    $('mode-manual').classList.toggle('d-none', btn.dataset.mode !== 'manual');
+  });
+});
+
+// ─── CSV Upload ───────────────────────────────────────────────────────────
+const uploadZone = $('upload-zone');
+const fileInput = $('csv-file-input');
+
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+
+function setFile(file) {
+  fileInput._selectedFile = file;
+  $('file-name').innerHTML = `📄 ${file.name} <button type="button" class="btn btn-sm ms-2" style="font-size:10px;padding:0 6px;color:#e85050;border:1px solid rgba(232,80,80,0.3);border-radius:4px" id="btn-clear-file">✕</button>`;
+  $('file-name').classList.remove('d-none');
+  $('btn-clear-file').addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    fileInput._selectedFile = null;
+    fileInput.value = '';
+    $('file-name').classList.add('d-none');
+    $('file-name').innerHTML = '';
+  });
+}
+
+$('csv-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const file = fileInput._selectedFile || (fileInput.files[0]);
+  if (!file) { showError('Please select a CSV file first.'); return; }
+
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('speed', $('csv-speed').value);
+  fd.append('load', $('csv-load').value);
+  fd.append('temp', $('csv-temp').value);
+  fd.append('model', $('csv-model').value);
+
+  setPredicting(true);
+  try {
+    const resp = await fetch('/api/predict/csv', { method: 'POST', body: fd });
+    const json = await resp.json();
+    if (json.error) throw new Error(json.error);
+    state.lastFileName = file.name.replace(/\.csv$/i, '');
+    showResult(json);
+    saveToHistory(json);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    setPredicting(false);
+  }
+});
+
+// ─── Manual Prediction ────────────────────────────────────────────────────
+const rmsSlider = $('rms-slider');
+rmsSlider.addEventListener('input', () => {
+  $('m-rms').value = parseFloat(rmsSlider.value).toFixed(2);
+  setText('rms-slider-val', parseFloat(rmsSlider.value).toFixed(2));
+});
+$('m-rms').addEventListener('input', () => {
+  rmsSlider.value = $('m-rms').value;
+  setText('rms-slider-val', parseFloat($('m-rms').value).toFixed(2));
+});
+
+$('manual-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const payload = {
+    model: $('m-model').value,
+    speed: +$('m-speed').value,
+    load: +$('m-load').value,
+    temp: +$('m-temp').value,
+    rms: +$('m-rms').value,
+    kurtosis: +$('m-kurtosis').value,
+    dominant_freq: +$('m-domfreq').value,
+    envelope_rms: +$('m-envrms').value,
+  };
+
+  setPredicting(false, 'manual');
+  try {
+    const endpoint = payload.model === 'ensemble' ? '/api/predict/ensemble' : '/api/predict/manual';
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const json = await resp.json();
+    if (json.error) throw new Error(json.error);
+    showResult(json);
+    saveToHistory(json);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    const btn = $('btn-predict-manual');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-lightning-charge-fill"></i> Predict RUL';
+  }
+});
+
+
+// ─── Compare Both Models ──────────────────────────────────────────────────
+
+$('btn-compare-models')?.addEventListener('click', async () => {
+  const btn = $('btn-compare-models');
+  const origHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Comparing…';
+
+  const payload = {
+    mode: 'manual',
+    speed: +$('m-speed').value,
+    load: +$('m-load').value,
+    temp: +$('m-temp').value,
+    rms: +$('m-rms').value,
+    kurtosis: +$('m-kurtosis').value,
+    dominant_freq: +$('m-domfreq').value,
+    envelope_rms: +$('m-envrms').value,
+  };
+
+  try {
+    const resp = await fetch('/api/predict/compare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const json = await resp.json();
+    if (json.error) throw new Error(json.error);
+    showComparisonResult(json);
+    // Save ensemble to history
+    if (json.ensemble) saveToHistory(json.ensemble);
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHTML;
+  }
+});
+
+
+// ─── Result Rendering ───────────────────────────────────────────────
+function showResult(r) {
+  const rul = r.predicted_rul;
+  const status = r.status?.toLowerCase() ?? 'healthy';
+  const pct = Math.min(r.rul_pct ?? 0, 100);
+
+  const barColor = status === 'healthy' ? '#6F8F72' :
+    status === 'degraded' ? '#F2A65A' : '#e85050';
+  const textColor = barColor;
+
+  let html = `
+    <div class="text-center w-100">
+      <div class="rul-gauge ${status} mx-auto mb-3">
+        <div>
+          <div class="rul-val" style="color:${textColor}">${rul.toLocaleString()}</div>
+          <div class="rul-unit">cycles remaining</div>
+        </div>
+      </div>
+
+      <div class="status-badge ${status} mx-auto d-inline-block mb-3">${r.status}</div>
+
+      <div class="px-3 mb-3">
+        <div class="d-flex justify-content-between small text-muted mb-1">
+          <span>Remaining Life</span>
+          <span>${pct.toFixed(1)}%</span>
+        </div>
+        <div class="rul-progress-track">
+          <div class="rul-progress-fill" style="width:${pct}%;background:${barColor}"></div>
+        </div>
+      </div>
+
+      ${renderConfidenceInterval(r)}
+
