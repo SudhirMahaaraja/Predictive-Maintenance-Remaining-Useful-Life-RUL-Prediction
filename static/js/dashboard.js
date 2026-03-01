@@ -976,3 +976,329 @@ function renderHistory() {
         </td>
         <td class="hist-cell-conditions">
           ${h.speed ?? '—'} RPM / ${h.load ?? '—'} N / ${h.temp ?? '—'} °C
+        </td>
+      </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div class="small text-muted">${history.length} prediction${history.length > 1 ? 's' : ''} recorded</div>
+      <button class="btn btn-sm btn-outline-danger" id="btn-clear-history" style="font-size:11px">
+        <i class="bi bi-trash3"></i> Clear History
+      </button>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-dark table-sm table-hover history-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Model</th>
+            <th>RUL</th>
+            <th>Status</th>
+            <th>95% CI</th>
+            <th>Conditions</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>`;
+
+  $('btn-clear-history')?.addEventListener('click', () => {
+    const modal = new bootstrap.Modal($('confirm-clear-modal'));
+    modal.show();
+    $('btn-confirm-clear').onclick = () => {
+      localStorage.removeItem(HISTORY_KEY);
+      renderHistory();
+      updateHistoryBadge();
+      modal.hide();
+    };
+  });
+}
+
+
+function infoTile(label, val) {
+  return `<div class="col-4">
+    <div class="metric-cell py-2">
+      <div style="font-size:13px;font-weight:700;color:#E8E2D8;font-family:'JetBrains Mono',monospace">${val}</div>
+      <div style="font-size:10px;color:#8a9490;text-transform:uppercase;letter-spacing:0.3px">${label}</div>
+    </div>
+  </div>`;
+}
+
+function statusAdvice(status) {
+  const advice = {
+    healthy: { icon: '🟢', text: 'Looking good! Your bearing is healthy. Keep up the regular check-ups 👍', cls: 'success' },
+    degraded: { icon: '🟡', text: 'Heads up — the bearing is showing some wear. Check it more often from now on.', cls: 'warning' },
+    critical: { icon: '🔴', text: 'Attention needed! This bearing is close to failure. Schedule maintenance ASAP ⚠️', cls: 'danger' },
+  };
+  const a = advice[status] || advice.healthy;
+  return `<div class="alert alert-${a.cls} py-2 px-3 text-start small mb-0">
+    <span class="me-1">${a.icon}</span> ${a.text}
+  </div>`;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+function setPredicting(loading, mode = 'csv') {
+  const btn = mode === 'csv' ? $('btn-predict-csv') : $('btn-predict-manual');
+  if (!btn) return;
+  if (loading) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> Predicting…';
+  } else {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-lightning-charge-fill"></i> Predict RUL';
+  }
+}
+
+function showError(msg) {
+  $('error-msg').textContent = msg;
+  new bootstrap.Modal($('error-modal')).show();
+}
+
+function formatNum(n) {
+  if (!n && n !== 0) return '—';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return n.toLocaleString();
+}
+
+// ─── Refresh button ───────────────────────────────────────────────────────
+$('btn-refresh-eda').addEventListener('click', () => {
+  // Clear all cached data
+  state.edaData = null;
+  state.edaStatus = 'idle';
+
+  // Clear all visible plot containers so stale images are gone
+  $('eda-plot-container').innerHTML =
+    '<p class="text-muted py-5"><span class="spinner-border spinner-border-sm me-2"></span> Re-running EDA analysis — this may take a minute…</p>';
+  $('eda-plot-description').textContent = 'ℹ️ Regenerating plots…';
+  const d2 = $('eda-plot-desc-line2');
+  if (d2) d2.textContent = '';
+  const ab = $('eda-plot-abbr');
+  if (ab) ab.innerHTML = '';
+
+  // Button loading state
+  const btn = $('btn-refresh-eda');
+  const origHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Running…';
+
+  // Navigate to EDA section so user sees progress
+  showSection('eda');
+
+  // Force a full EDA re-run, then restore button and re-render active tab
+  startEda(true).finally(() => {
+    btn.disabled = false;
+    btn.innerHTML = origHTML;
+    // Re-render the currently active tab with fresh data
+    if (state.edaData) renderEdaPlot(state.activeEdaPlot);
+  });
+});
+
+
+// ─── Theme Toggle ─────────────────────────────────────────────────────────
+function applyTheme(isLight) {
+  const body = document.body;
+  const icon = $('theme-icon');
+  if (isLight) {
+    body.classList.add('light-mode');
+    icon.className = 'bi bi-moon-stars-fill';
+    $('btn-theme-toggle').title = 'Switch to Dark Mode';
+  } else {
+    body.classList.remove('light-mode');
+    icon.className = 'bi bi-sun-fill';
+    $('btn-theme-toggle').title = 'Switch to Light Mode';
+  }
+}
+
+$('btn-theme-toggle').addEventListener('click', () => {
+  const isNowLight = !document.body.classList.contains('light-mode');
+  applyTheme(isNowLight);
+  localStorage.setItem('rul-theme', isNowLight ? 'light' : 'dark');
+});
+
+// ─── Export Report ─────────────────────────────────────────────────────────
+function _loadScript(url) {
+  return new Promise((resolve, reject) => {
+    const id = 's_' + url.split('/').pop().replace(/[^a-z0-9]/gi, '');
+    if (document.getElementById(id)) { resolve(); return; }
+    const s = document.createElement('script');
+    s.id = id;
+    s.src = url;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+function _exportBaseName() {
+  if (state.lastFileName) return state.lastFileName;
+  return 'RUL_Report_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+}
+
+function exportResultPNG() {
+  const panel = $('result-panel');
+  if (!panel || !panel.innerText.trim()) return;
+  _loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
+    .then(() => html2canvas(panel, { backgroundColor: '#1a1f1e', scale: 2, useCORS: true, allowTaint: true }))
+    .then(canvas => {
+      const link = document.createElement('a');
+      link.download = `${_exportBaseName()}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    })
+    .catch(err => showError('Export PNG failed: ' + err.message));
+}
+
+function exportResultPDF() {
+  const panel = $('result-panel');
+  if (!panel || !panel.innerText.trim()) return;
+  Promise.all([
+    _loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'),
+    _loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'),
+  ])
+    .then(() => html2canvas(panel, { backgroundColor: '#1a1f1e', scale: 2, useCORS: true, allowTaint: true }))
+    .then(canvas => {
+      const { jsPDF } = window.jspdf;
+      const imgData = canvas.toDataURL('image/png');
+      // Page = exact image size, no margins, no header
+      const pxToMm = 0.264583;
+      const w = canvas.width * pxToMm / 2;
+      const h = canvas.height * pxToMm / 2;
+      const pdf = new jsPDF({ unit: 'mm', format: [w, h] });
+      pdf.addImage(imgData, 'PNG', 0, 0, w, h);
+      pdf.save(`${_exportBaseName()}.pdf`);
+    })
+    .catch(err => showError('Export PDF failed: ' + err.message));
+}
+
+// ─── Batch CSV Upload ─────────────────────────────────────────────────────
+const batchInput = $('batch-file-input');
+const batchZone = $('batch-upload-zone');
+
+if (batchZone && batchInput) {
+  batchZone.addEventListener('click', () => batchInput.click());
+  batchZone.addEventListener('dragover', e => { e.preventDefault(); batchZone.classList.add('drag-over'); });
+  batchZone.addEventListener('dragleave', () => batchZone.classList.remove('drag-over'));
+  batchZone.addEventListener('drop', e => {
+    e.preventDefault();
+    batchZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) handleBatchFiles(e.dataTransfer.files);
+  });
+  batchInput.addEventListener('change', () => {
+    if (batchInput.files.length) handleBatchFiles(batchInput.files);
+  });
+}
+
+function handleBatchFiles(fileList) {
+  const files = Array.from(fileList).filter(f => f.name.endsWith('.csv'));
+  if (files.length === 0) { showError('No CSV files found.'); return; }
+
+  const batchInfo = $('batch-file-info');
+  if (batchInfo) {
+    batchInfo.innerHTML = `📁 ${files.length} CSV file(s) selected <button type="button" class="btn btn-sm ms-2" style="font-size:10px;padding:0 6px;color:#e85050;border:1px solid rgba(232,80,80,0.3);border-radius:4px" id="btn-clear-batch">✕ Clear</button>`;
+    $('btn-clear-batch')?.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      batchInput.value = '';
+      batchInfo.innerHTML = '';
+      $('btn-batch-predict')?.classList.add('d-none');
+    });
+  }
+
+  const btn = $('btn-batch-predict');
+  if (btn) {
+    btn.classList.remove('d-none');
+    btn.onclick = () => runBatchPredict(files);
+  }
+}
+
+async function runBatchPredict(files) {
+  const btn = $('btn-batch-predict');
+  const origHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Processing…';
+
+  const fd = new FormData();
+  files.forEach(f => fd.append('files[]', f));
+  fd.append('model', $('csv-model')?.value || 'rf');
+  fd.append('speed', $('csv-speed')?.value || '1800');
+  fd.append('load', $('csv-load')?.value || '4000');
+  fd.append('temp', $('csv-temp')?.value || '35');
+
+  try {
+    const resp = await fetch('/api/predict/batch', { method: 'POST', body: fd });
+    const json = await resp.json();
+    if (json.error) throw new Error(json.error);
+    state.lastFileName = `Batch_Results_${files.length}_files`;
+    showBatchResults(json.results);
+    // Save all to history
+    json.results.forEach(r => { if (!r.error) saveToHistory(r); });
+  } catch (err) {
+    showError(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origHTML;
+  }
+}
+
+function showBatchResults(results) {
+  const valid = results.filter(r => !r.error);
+  const errCount = results.length - valid.length;
+  const avgRul = valid.length ? Math.round(valid.reduce((s, r) => s + r.predicted_rul, 0) / valid.length) : 0;
+  const minRul = valid.length ? Math.min(...valid.map(r => r.predicted_rul)) : 0;
+  const maxRul = valid.length ? Math.max(...valid.map(r => r.predicted_rul)) : 0;
+  const healCount = valid.filter(r => r.status?.toLowerCase() === 'healthy').length;
+  const degCount = valid.filter(r => r.status?.toLowerCase() === 'degraded').length;
+  const critCount = valid.filter(r => r.status?.toLowerCase() === 'critical').length;
+
+  let rows = results.map(r => {
+    if (r.error) {
+      return `<div class="batch-item"><div class="batch-fname">${r.filename}</div><span class="text-danger small">❌ ${r.error}</span></div>`;
+    }
+    const st = r.status?.toLowerCase() || 'healthy';
+    const color = st === 'healthy' ? '#6F8F72' : st === 'degraded' ? '#F2A65A' : '#e85050';
+    const pct = Math.min(r.rul_pct ?? 0, 100);
+    return `<div class="batch-item">
+      <div class="batch-status-dot" style="background:${color}"></div>
+      <div class="batch-fname" title="${r.filename}">${r.filename}</div>
+      <div style="flex:1;max-width:120px"><div class="compare-progress-track"><div class="rul-progress-fill" style="width:${pct}%;background:${color}"></div></div></div>
+      <div class="batch-rul" style="color:${color}">${r.predicted_rul?.toLocaleString()}</div>
+      <span class="small" style="color:${color};min-width:65px">${r.status}</span>
+    </div>`;
+  }).join('');
+
+  $('result-panel').innerHTML = `
+    <div class="w-100">
+      <div class="text-center mb-3">
+        <i class="bi bi-collection-fill fs-3" style="color:#6F8F72"></i>
+        <div class="fw-bold mt-1">📦 Batch Results — ${results.length} files analyzed</div>
+      </div>
+      <div class="row g-2 mb-3 px-2">
+        <div class="col-4 col-md-2"><div class="metric-cell py-2"><div class="metric-cell-val" style="font-size:18px;color:#BFC6C4">${avgRul.toLocaleString()}</div><div class="metric-cell-label">Avg RUL</div></div></div>
+        <div class="col-4 col-md-2"><div class="metric-cell py-2"><div class="metric-cell-val" style="font-size:18px;color:#e85050">${minRul.toLocaleString()}</div><div class="metric-cell-label">Min RUL</div></div></div>
+        <div class="col-4 col-md-2"><div class="metric-cell py-2"><div class="metric-cell-val" style="font-size:18px;color:#6F8F72">${maxRul.toLocaleString()}</div><div class="metric-cell-label">Max RUL</div></div></div>
+        <div class="col-4 col-md-2"><div class="metric-cell py-2"><div class="metric-cell-val" style="font-size:18px;color:#6F8F72">${healCount}</div><div class="metric-cell-label">🟢 Healthy</div></div></div>
+        <div class="col-4 col-md-2"><div class="metric-cell py-2"><div class="metric-cell-val" style="font-size:18px;color:#F2A65A">${degCount}</div><div class="metric-cell-label">🟡 Degraded</div></div></div>
+        <div class="col-4 col-md-2"><div class="metric-cell py-2"><div class="metric-cell-val" style="font-size:18px;color:#e85050">${critCount}</div><div class="metric-cell-label">🔴 Critical</div></div></div>
+      </div>
+      ${errCount ? `<div class="alert alert-danger py-1 px-3 small mx-2 mb-2">${errCount} file(s) had errors</div>` : ''}
+      <div class="batch-results rounded" style="background:var(--bg-card2);border:1px solid var(--border)">${rows}</div>
+      <div class="mt-3 d-flex gap-2 justify-content-center">
+        <button class="btn btn-export btn-sm" onclick="exportResultPNG()"><i class="bi bi-image"></i> Export PNG</button>
+        <button class="btn btn-export btn-sm" onclick="exportResultPDF()"><i class="bi bi-file-earmark-pdf"></i> Export PDF</button>
+      </div>
+    </div>`;
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+(async () => {
+  // Restore saved theme (default: dark)
+  const savedTheme = localStorage.getItem('rul-theme');
+  applyTheme(savedTheme === 'light');
+
+  updateHistoryBadge();
+  showSection('overview');
+  await startEda(false);
+  // Load models in background
+  await loadModels();
+})();
