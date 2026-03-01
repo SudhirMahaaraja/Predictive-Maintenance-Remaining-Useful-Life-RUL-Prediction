@@ -650,3 +650,329 @@ function showResult(r) {
 
       ${renderConfidenceInterval(r)}
 
+      <div class="row g-2 px-3 mt-1">
+        ${infoTile('Model', r.model_used)}
+        ${infoTile('Speed', r.speed + ' RPM')}
+        ${infoTile('Load', r.load + ' N')}
+        ${infoTile('Temp', r.temp + ' °C')}
+        ${infoTile('Features', r.n_features)}
+        ${infoTile('RUL %', pct.toFixed(1) + '%')}
+      </div>
+
+      <div class="mt-3 px-3">
+        ${statusAdvice(status)}
+      </div>
+
+      <div class="mt-3 px-3 d-flex gap-2 justify-content-center">
+        <button class="btn btn-export btn-sm" onclick="exportResultPNG()">
+          <i class="bi bi-image"></i> Export PNG
+        </button>
+        <button class="btn btn-export btn-sm" onclick="exportResultPDF()">
+          <i class="bi bi-file-earmark-pdf"></i> Export PDF
+        </button>
+      </div>
+
+      ${renderShapSection(r)}
+
+      ${r.plot_b64 ? `
+      <div class="mt-4 px-3 text-start">
+        <div class="text-muted small fw-semibold mb-2"><i class="bi bi-graph-up text-info"></i> Analyzed Signal (Horizontal & Vertical)</div>
+        <div class="p-2 rounded mb-2" style="background: var(--bg-card2); border: 1px solid var(--border)">
+            <img src="data:image/png;base64,${r.plot_b64}" class="img-fluid w-100" alt="Signal Plot"/>
+        </div>
+        <div class="p-3 rounded mt-2" style="background: rgba(111,143,114,0.08); border: 1px solid var(--border); line-height: 1.5">
+           <div class="small mb-2" style="color: var(--text-primary)">
+               <strong>What you're seeing:</strong> This chart shows the vibration shaking we captured (or simulated) — both sideways and up-down directions.<br>
+               Bigger and messier waves usually mean the bearing is getting worn. Think of it like listening to a machine — a healthy one hums smoothly, a worn one rattles.
+           </div>
+           <div class="small fw-semibold mt-2" style="color: #6F8F72">
+               <i class="bi bi-check-circle"></i> What to do next:<br>
+               <span style="font-weight: 400; color: var(--text-primary)">If peak vibrations keep climbing above the healthy baseline, it's time to take a closer look at the bearing or plan a replacement.</span>
+           </div>
+        </div>
+      </div>` : ''}
+
+      ${r.eda_plot_b64 ? `
+      <div class="mt-4 px-3 text-start">
+        <div class="text-muted small fw-semibold mb-2"><i class="bi bi-trophy-fill text-warning"></i> Predictive Feature Importance</div>
+        <div class="p-2 rounded mb-2" style="background: var(--bg-card2); border: 1px solid var(--border)">
+            <img src="data:image/png;base64,${r.eda_plot_b64}" class="img-fluid w-100" alt="Feature Importance"/>
+        </div>
+        <div class="p-3 rounded mt-2" style="background: rgba(111,143,114,0.08); border: 1px solid var(--border); line-height: 1.5">
+           <div class="small mb-2" style="color: var(--text-primary)">
+               <strong>What this means:</strong> The model looks at several measurements from your vibration data. The ones at the top of this chart matter the most.<br>
+               Think of them as the biggest clues the model uses to figure out how much life is left.<br>
+               Your data was checked against these top clues to come up with the RUL number above.
+           </div>
+           <div class="small fw-semibold mt-2" style="color: #F2A65A">
+               <i class="bi bi-arrow-right-circle"></i> What to do next:<br>
+               <span style="font-weight: 400; color: var(--text-primary)">Keep an eye on those top features over time. If they start spiking consistently, that's a sign the bearing needs attention soon.</span>
+           </div>
+        </div>
+      </div>` : ''}
+    </div>
+  `;
+
+  $('result-panel').innerHTML = html;
+
+  // Animate progress bar
+  setTimeout(() => {
+    const fill = $('result-panel').querySelector('.rul-progress-fill');
+    if (fill) fill.style.width = pct + '%';
+  }, 50);
+}
+
+
+// ─── Confidence Interval Rendering ────────────────────────────────────────
+function renderConfidenceInterval(r) {
+  const ci = r.confidence_interval;
+  if (!ci) return '';
+
+  return `
+    <div class="ci-card mx-3 mb-3">
+      <div class="ci-header">
+        <i class="bi bi-shield-check"></i> 95% Confidence Interval
+        <span class="ci-method">${ci.ci_method || ''}</span>
+      </div>
+      <div class="ci-body">
+        <div class="ci-range">
+          <span class="ci-val ci-lower">${ci.ci_lower.toLocaleString()}</span>
+          <div class="ci-bar-wrap">
+            <div class="ci-bar-track">
+              <div class="ci-bar-fill" style="left:${ciBarPct(ci.ci_lower)}%;width:${ciBarPct(ci.ci_upper) - ciBarPct(ci.ci_lower)}%"></div>
+              <div class="ci-bar-marker" style="left:${ciBarPct(r.predicted_rul)}%"></div>
+            </div>
+            <div class="ci-bar-labels">
+              <span>0</span>
+              <span>${(1500).toLocaleString()}</span>
+            </div>
+          </div>
+          <span class="ci-val ci-upper">${ci.ci_upper.toLocaleString()}</span>
+        </div>
+        <div class="ci-detail">
+          <span>σ = ${ci.ci_std.toLocaleString()} cycles</span>
+          ${ci.n_estimators ? `<span>${ci.n_estimators} estimators</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+function ciBarPct(val) {
+  return Math.max(0, Math.min(100, (val / 1500) * 100));
+}
+
+
+// ─── SHAP Explanation Rendering ───────────────────────────────────────────
+function renderShapSection(r) {
+  if (!r.shap) return '';
+
+  const s = r.shap;
+  let featRows = '';
+  const topFeats = s.top_features?.slice(0, 8) || [];
+  topFeats.forEach(f => {
+    const dir = f.shap_value >= 0 ? 'positive' : 'negative';
+    const icon = f.shap_value >= 0
+      ? '<i class="bi bi-arrow-up-short" style="color:#6F8F72"></i>'
+      : '<i class="bi bi-arrow-down-short" style="color:#e85050"></i>';
+    featRows += `
+      <div class="shap-feat-row ${dir}">
+        <span class="shap-feat-name">${f.name}</span>
+        <span class="shap-feat-val">${icon} ${f.shap_value.toFixed(3)}</span>
+      </div>`;
+  });
+
+  return `
+    <div class="mt-4 px-3 text-start">
+      <div class="text-muted small fw-semibold mb-2">
+        <i class="bi bi-lightbulb-fill" style="color:#F2A65A"></i>
+        SHAP Explanation — Why This Prediction?
+      </div>
+      <div class="shap-card">
+        ${s.shap_plot_b64 ? `
+        <div class="p-2 rounded mb-3" style="background: var(--bg-card2); border: 1px solid var(--border)">
+          <img src="data:image/png;base64,${s.shap_plot_b64}" class="img-fluid w-100" alt="SHAP Plot"/>
+        </div>` : ''}
+        <div class="shap-feat-grid">
+          ${featRows}
+        </div>
+        <div class="shap-base-note mt-2">
+          Base value (avg prediction): <strong>${s.base_value?.toLocaleString() ?? '—'}</strong> cycles
+        </div>
+        <div class="p-3 rounded mt-2" style="background: rgba(111,143,114,0.08); border: 1px solid var(--border); line-height: 1.5">
+          <div class="small" style="color: var(--text-primary)">
+            <strong>How to read this:</strong>
+            <span style="color:#6F8F72">Green (positive)</span> features are pushing the prediction <strong>higher</strong> (healthier bearing).
+            <span style="color:#e85050">Red (negative)</span> features pull it <strong>lower</strong> (more worn out).
+            The ones at the top have the biggest impact on this specific result.
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+
+// ─── Side-by-Side Comparison Rendering ────────────────────────────────────
+function showComparisonResult(data) {
+  const rf = data.rf;
+  const xgb = data.xgb;
+  const ens = data.ensemble;
+
+  function miniGauge(r, label, color) {
+    if (r?.error) return `<div class="compare-mini text-center"><p class="text-danger small">${label}: ${r.error}</p></div>`;
+    const rul = r.predicted_rul;
+    const st = r.status?.toLowerCase() || 'healthy';
+    const pct = Math.min(r.rul_pct ?? 0, 100);
+
+    return `
+      <div class="compare-mini">
+        <div class="compare-model-label" style="color:${color}">${label}</div>
+        <div class="compare-gauge ${st}">
+          <div class="compare-rul-val" style="color:${color}">${rul.toLocaleString()}</div>
+          <div class="compare-rul-unit">cycles</div>
+        </div>
+        <div class="status-badge ${st} mx-auto d-inline-block mb-2" style="font-size:11px;padding:3px 12px">${r.status}</div>
+        ${r.confidence_interval ? `
+        <div class="compare-ci small text-muted">
+          CI: ${r.confidence_interval.ci_lower.toLocaleString()} – ${r.confidence_interval.ci_upper.toLocaleString()}
+        </div>` : ''}
+        <div class="compare-progress-track mt-2">
+          <div class="rul-progress-fill" style="width:${pct}%;background:${color}"></div>
+        </div>
+      </div>`;
+  }
+
+  const html = `
+    <div class="text-center w-100">
+      <div class="compare-header mb-3">
+        <i class="bi bi-layout-split"></i> Side-by-Side Model Comparison
+      </div>
+      <div class="compare-grid">
+        ${miniGauge(rf, 'Random Forest', '#6F8F72')}
+        ${miniGauge(xgb, 'XGBoost', '#F2A65A')}
+        ${ens ? miniGauge(ens, 'Ensemble (Weighted)', '#BFC6C4') : ''}
+      </div>
+
+      ${ens ? `
+      <div class="ensemble-detail mt-3 mx-3">
+        <div class="small text-muted mb-1 fw-semibold">
+          <i class="bi bi-layers-fill" style="color:#BFC6C4"></i> Ensemble Weights
+        </div>
+        <div class="d-flex justify-content-center gap-3">
+          <span class="badge" style="background:rgba(111,143,114,0.15);color:#6F8F72;border:1px solid rgba(111,143,114,0.3)">
+            RF: <b>${(ens.weights?.rf * 100).toFixed(1)}%</b>
+          </span>
+          <span class="badge" style="background:rgba(242,166,90,0.15);color:#F2A65A;border:1px solid rgba(242,166,90,0.3)">
+            XGB: <b>${(ens.weights?.xgb * 100).toFixed(1)}%</b>
+          </span>
+        </div>
+      </div>` : ''}
+
+      ${rf?.plot_b64 ? `
+      <div class="mt-4 px-3 text-start">
+        <div class="text-muted small fw-semibold mb-2"><i class="bi bi-graph-up text-info"></i> Analyzed Signal</div>
+        <div class="p-2 rounded" style="background: var(--bg-card2); border: 1px solid var(--border)">
+            <img src="data:image/png;base64,${rf.plot_b64}" class="img-fluid w-100" alt="Signal Plot"/>
+        </div>
+      </div>` : ''}
+
+      ${rf?.shap?.shap_plot_b64 ? `
+      <div class="mt-3 px-3 text-start">
+        <div class="text-muted small fw-semibold mb-2"><i class="bi bi-lightbulb-fill" style="color:#F2A65A"></i> SHAP — RF Explanation</div>
+        <div class="p-2 rounded" style="background: var(--bg-card2); border: 1px solid var(--border)">
+            <img src="data:image/png;base64,${rf.shap.shap_plot_b64}" class="img-fluid w-100" alt="SHAP RF"/>
+        </div>
+      </div>` : ''}
+
+      <div class="mt-3 px-3">
+        ${statusAdvice(ens?.status?.toLowerCase() || rf?.status?.toLowerCase() || 'healthy')}
+      </div>
+    </div>`;
+
+  $('result-panel').innerHTML = html;
+}
+
+
+// ─── Prediction History (localStorage) ────────────────────────────────────
+
+const HISTORY_KEY = 'rul-prediction-history';
+const MAX_HISTORY = 50;
+
+function getHistory() {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+  } catch { return []; }
+}
+
+function saveToHistory(r) {
+  const history = getHistory();
+  history.unshift({
+    timestamp: new Date().toISOString(),
+    predicted_rul: r.predicted_rul,
+    status: r.status,
+    model_used: r.model_used,
+    speed: r.speed,
+    load: r.load,
+    temp: r.temp,
+    rul_pct: r.rul_pct,
+    n_features: r.n_features,
+    ci_lower: r.confidence_interval?.ci_lower,
+    ci_upper: r.confidence_interval?.ci_upper,
+  });
+  // Keep only last MAX_HISTORY entries
+  if (history.length > MAX_HISTORY) history.length = MAX_HISTORY;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  updateHistoryBadge();
+}
+
+function updateHistoryBadge() {
+  const badge = $('history-count-badge');
+  if (badge) {
+    const count = getHistory().length;
+    badge.textContent = count;
+    badge.classList.toggle('d-none', count === 0);
+  }
+}
+
+function renderHistory() {
+  const container = $('history-container');
+  if (!container) return;
+
+  const history = getHistory();
+  if (history.length === 0) {
+    container.innerHTML = `
+      <div class="text-center text-muted py-5">
+        <i class="bi bi-clock-history fs-1 d-block mb-3" style="opacity:0.3"></i>
+        <p>Nothing here yet! Run a prediction and it'll show up automatically.</p>
+      </div>`;
+    return;
+  }
+
+  let tableRows = history.map((h, i) => {
+    const st = h.status?.toLowerCase() || 'healthy';
+    const stColor = st === 'healthy' ? '#6F8F72' : st === 'degraded' ? '#F2A65A' : '#e85050';
+    const ts = new Date(h.timestamp);
+    const timeStr = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateStr = ts.toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+    return `
+      <tr class="history-row">
+        <td class="hist-cell-time">
+          <div class="hist-date">${dateStr}</div>
+          <div class="hist-time">${timeStr}</div>
+        </td>
+        <td>
+          <span class="hist-model-badge">${h.model_used || '—'}</span>
+        </td>
+        <td>
+          <span class="hist-rul-val" style="color:${stColor}">${h.predicted_rul?.toLocaleString() ?? '—'}</span>
+          <span class="hist-rul-unit">cyc</span>
+        </td>
+        <td>
+          <span class="hist-status-dot" style="background:${stColor}"></span>
+          ${h.status || '—'}
+        </td>
+        <td class="hist-cell-ci">
+          ${h.ci_lower != null ? `${h.ci_lower.toLocaleString()} – ${h.ci_upper.toLocaleString()}` : '—'}
+        </td>
+        <td class="hist-cell-conditions">
+          ${h.speed ?? '—'} RPM / ${h.load ?? '—'} N / ${h.temp ?? '—'} °C
